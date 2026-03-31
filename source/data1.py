@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 higgs = pd.read_csv("D:\Praktyki_zawodowe\Htt_plotter/data/Higgs.csv")
 
@@ -31,9 +32,13 @@ class Plotter:
         self.alpha = alpha
         self.recon = []
         self.contr = []
+        self.base_path = Path(__file__).resolve().parent.parent
 
-    def load_data(self, filepath):
-        self.data = pd.read_csv(filepath)
+    def load_data(self, relative_path):
+        full_path = self.base_path / relative_path
+        
+        if full_path.exists():
+            self.data = pd.read_csv(full_path)
 
     def set_parameters(self, contr_name=None, recon_name=None):
         if contr_name is None:
@@ -43,25 +48,58 @@ class Plotter:
         
         self.contr_name = contr_name
         self.recon_name = recon_name
+        self.resolution_true = contr_name
 
     def control_plot(self):
         contr = self.data[self.contr_name]
-        contr.plot.hist(title = f"Control {self.contr_name} histogram", range = (-self.xlim, self.xlim), bins = self.bins, edgecolor="black")
+
+        counts, bins = np.histogram(
+            contr,
+            bins=self.bins,
+            range=(-self.xlim, self.xlim)
+        )
+
+        plt.bar(
+            bins[:-1],
+            counts,
+            width=np.diff(bins),
+            edgecolor="black",
+            align="edge"
+        )
+
+        plt.title(f"Control {self.contr_name} histogram")
         plt.xlabel(self.contr_name)
+
         plt.savefig(f"{self.contr_name}.png")
         plt.clf()
 
     def resolution_plot(self):
-        contr = self.data[self.contr_name]
+        resolution_true = self.data[self.resolution_true]
         recon = self.data[self.recon_name]
-        roznica = (recon - contr) / contr
-        roznica.plot.hist(title = f"Resolution {self.recon_name} histogram", range = (-self.xlim, self.xlim), bins = self.bins, alpha = 1, edgecolor="black")
-        plt.legend([f"Control - {self.contr_name}", f"Reconstruction - {self.recon_name}"], loc="upper right")
-        plt.savefig(f"Test_{self.recon_name}_od_{self.contr_name}.png")
+
+        resolution = (recon - resolution_true) / resolution_true
+
+        counts, bins = np.histogram(
+            resolution,
+            bins=self.bins,
+            range=(-self.xlim, self.xlim)
+        )
+
+        plt.bar(
+            bins[:-1],
+            counts,
+            width=np.diff(bins),
+            edgecolor="black",
+            align="edge"
+        )
+
+        plt.title(f"Resolution {self.recon_name} histogram")
+        plt.legend([f"Control - {self.resolution_true}", f"Reconstruction - {self.recon_name}"], loc="upper right")
+        plt.savefig(f"Test_{self.recon_name}_from_{self.resolution_true}.png")
         plt.clf()
 
-object = Plotter(20, 50, 0.7)
-print(object.load_data("D:\Praktyki_zawodowe\Htt_plotter/data/Higgs.csv"))
-print(object.set_parameters())
+object = Plotter(20, 20, 1)
+print(object.load_data("data/Higgs.csv"))
+print(object.set_parameters("trueMETx", "METx"))
 print(object.control_plot())
 print(object.resolution_plot())
