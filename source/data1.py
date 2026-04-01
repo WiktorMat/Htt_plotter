@@ -50,6 +50,24 @@ class Plotter:
         self.recon_name = recon_name
         self.resolution_true = contr_name
 
+    def batch(self, batch_size):
+        contr = self.data[self.contr_name]
+        recon = self.data[self.recon_name]
+
+        if batch_size is None:
+            batch_size = int(input("Set batch size: "))
+
+        resolution = (recon - contr) / contr
+        resolution = resolution.replace([np.inf, -np.inf], np.nan).dropna()
+
+        batches = [
+        resolution.iloc[i:i+batch_size].reset_index(drop=True)
+        for i in range(0, len(resolution), batch_size)
+        ]
+
+        self.batch_df = pd.concat(batches, axis=1)
+
+
     def control_plot(self):
         contr = self.data[self.contr_name]
 
@@ -74,13 +92,9 @@ class Plotter:
         plt.clf()
 
     def resolution_plot(self):
-        resolution_true = self.data[self.resolution_true]
-        recon = self.data[self.recon_name]
-
-        resolution = (recon - resolution_true) / resolution_true
 
         counts, bins = np.histogram(
-            resolution,
+            self.batch_df,
             bins=self.bins,
             range=(-self.xlim, self.xlim)
         )
@@ -101,5 +115,6 @@ class Plotter:
 object = Plotter(20, 20, 1)
 print(object.load_data("data/Higgs.csv"))
 print(object.set_parameters("trueMETx", "METx"))
+print(object.batch(1000))
 print(object.control_plot())
 print(object.resolution_plot())
