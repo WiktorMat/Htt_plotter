@@ -68,15 +68,31 @@ class Plotter:
 
 
     def set_parameters(self, contr_name=None, recon_name=None):
-        if contr_name is None:
-            contr_name = input("Set control: ")
-        if recon_name is None:
-            recon_name = input("Set reconstruction: ")
-        
-        self.contr_name = contr_name
-        self.recon_name = recon_name
 
-        print(f"Control file is {contr_name}, and resolution is {recon_name}")
+        self.contr_name = []
+        self.recon_name = []
+
+
+        if contr_name is None or recon_name is None:
+            while True:
+                contr_name_input = input("Set control: ")
+                recon_name_input = input("Set reconstruction: ")
+
+                self.contr_name.append(contr_name_input)
+                self.recon_name.append(recon_name_input)
+
+                print(f"Added: Control = {contr_name_input}, Resolution = {recon_name_input}")
+
+                end = input("Write 'end' to finish, or press ENTER to add more: ")
+                if end.lower() == "end":
+                    break
+        else:
+            self.contr_name.append(contr_name)
+            self.recon_name.append(recon_name)
+
+        for i, c in enumerate(self.contr_name):
+            print(f"Control file is {c}, and resolution is {self.recon_name[i]}")
+
 
     def batch(self, batch_size=None):
         if batch_size is None:
@@ -84,27 +100,36 @@ class Plotter:
         else:
             self.batch_size = batch_size
 
-        self.batch_dfs = []
+        self.batch_dfs = {}
 
-        for item in self.all_data:
-            df = item["data"]
+        for contr_name, recon_name in zip(self.contr_name, self.recon_name):
+            key = f"{contr_name}_{recon_name}"
+            self.batch_dfs[key] = []
 
-            if self.contr_name in df.columns and self.recon_name in df.columns:
-                contr = df[self.contr_name]
-                recon = df[self.recon_name]
+            for item in self.all_data:
+                df = item["data"]
+                file_name = item["name"]
+
+                if contr_name not in df.columns or recon_name not in df.columns:
+                    continue
+
+                contr = df[contr_name]
+                recon = df[recon_name]
 
                 resolution = (recon - contr) / contr
                 resolution = resolution.replace([np.inf, -np.inf], np.nan).dropna()
 
                 batches = [
-                    resolution.iloc[i:i+self.batch_size].reset_index(drop=True)
-                    for i in range(0, len(resolution), self.batch_size)
+                    resolution.iloc[j:j+self.batch_size].reset_index(drop=True)
+                    for j in range(0, len(resolution), self.batch_size)
                 ]
 
                 batch_df = pd.concat(batches, axis=1)
-                self.batch_dfs.append(batch_df)
-            else:
-                print(f"Column {self.contr_name} or {self.recon_name} does not exist")
+
+                self.batch_dfs[key].append({
+                    "name": file_name,
+                    "data": batch_df
+                })
 
 
     def control_plot(self):
@@ -117,56 +142,54 @@ class Plotter:
 
         colors = ["blue", "lime", "red", "orange", "purple", "cyan", "magenta"]
 
-        plt.figure()
-        bottom_counts = None
-        labels = []
+        for contr_name in self.contr_name:
+            plt.figure()
+            bottom_counts = None
+            labels = []
 
-        for i, item in enumerate(self.all_data):
-            df = item["data"]
-            file_name = item["name"]
-            if self.contr_name not in df.columns:
-                print(f"File {file_name} does not contain {self.contr_name}, next")
-                continue
+            for i, item in enumerate(self.all_data):
+                df = item["data"]
+                file_name = item["name"]
 
-            contr = df[self.contr_name]
+                if contr_name not in df.columns:
+                    print(f"File {file_name} does not contain {contr_name}, skipping")
+                    continue
 
-            counts, bins = np.histogram(
-                contr,
-                bins=self.bins,
-                range=(-self.xlim_ctrl, self.xlim_ctrl)
-            )
+                contr = df[contr_name]
+                counts, bins = np.histogram(
+                    contr,
+                    bins=self.bins,
+                    range=(-self.xlim_ctrl, self.xlim_ctrl)
+                )
 
-            width = np.diff(bins)
+                if bottom_counts is None:
+                    bottom_counts = np.zeros_like(counts)
 
-            if bottom_counts is None:
-                bottom_counts = np.zeros_like(counts)
+                plt.bar(
+                    bins[:-1],
+                    counts,
+                    width=np.diff(bins),
+                    bottom=bottom_counts,
+                    color=colors[i % len(colors)],
+                    edgecolor="black",
+                    align="edge",
+                )
 
-            plt.bar(
-                bins[:-1],
-                counts,
-                width=width,
-                bottom=bottom_counts,
-                color=colors[i % len(colors)],
-                edgecolor="black",
-                align="edge",
-            )
+                bottom_counts += counts
+                labels.append(file_name)
 
-            bottom_counts += counts
-            labels.append(f"Control for {file_name} - {self.recon_name}")
+            plt.title(f"Control {contr_name} histogram")
+            plt.xlabel(contr_name)
+            plt.legend([f"From {label} - {contr_name}" for label in labels], loc="upper right")
 
-        plt.title(f"Control {self.contr_name} histogram")
-        plt.xlabel(self.contr_name)
-        plt.legend(labels, loc="upper right")
-
-        file_path = os.path.join(folder_name, f"{self.contr_name}.png")
-        plt.savefig(file_path)
-        plt.clf()
-        print(f"File saved to {file_path}")
+            file_path = os.path.join(folder_name, f"{contr_name}.png")
+            plt.savefig(file_path)
+            plt.clf()
+            print(f"File saved to {file_path}")
 
     def resolution_plot(self):
-
         if not hasattr(self, "batch_dfs") or len(self.batch_dfs) == 0:
-            print("No batches for histogram")
+            print("No batch data available")
             return
 
         folder_name = "resolution_plots"
@@ -174,58 +197,58 @@ class Plotter:
 
         colors = ["blue", "lime", "red", "orange", "purple", "cyan", "magenta"]
 
-        plt.figure()
+        for key in self.batch_dfs:
+            plt.figure()
+            bottom_counts = None
+            labels = []
 
-        bottom_counts = None
+            for i, item in enumerate(self.batch_dfs[key]):
+                file_name = item["name"]
+                batch_df = item["data"]
 
-        for i, batch_df in enumerate(self.batch_dfs):
-            if hasattr(batch_df, "values"):
                 values = batch_df.values.flatten()
-            else:
-                values = batch_df
 
-            counts, bins = np.histogram(
-                values,
-                bins=self.bins,
-                range=(-self.xlim_resol, self.xlim_resol)
+                counts, bins = np.histogram(
+                    values,
+                    bins=self.bins,
+                    range=(-self.xlim_resol, self.xlim_resol)
+                )
+
+                if bottom_counts is None:
+                    bottom_counts = np.zeros_like(counts)
+
+                plt.bar(
+                    bins[:-1],
+                    counts,
+                    width=np.diff(bins),
+                    bottom=bottom_counts,
+                    color=colors[i % len(colors)],
+                    edgecolor="black",
+                    align="edge",
+                )
+
+                bottom_counts += counts
+                labels.append(file_name)
+
+            contr_name, recon_name = key.split("_")
+
+            plt.title(f"Resolution {recon_name} histogram")
+            plt.xlabel(recon_name)
+            plt.legend(
+                [f"From {l} - {recon_name}" for l in labels],
+                loc="upper right"
             )
-
-            width = np.diff(bins)
-
-            if bottom_counts is None:
-                bottom_counts = np.zeros_like(counts)
-
-
-            plt.bar(
-                bins[:-1],
-                counts,
-                width=width,
-                bottom=bottom_counts,
-                color=colors[i % len(colors)],
-                edgecolor="black",
-                align="edge",
+            file_path = os.path.join(
+                folder_name,
+                f"Test_{recon_name}_from_{contr_name}.png"
             )
-
-            bottom_counts += counts
-
-        plt.title(f"Resolution {self.recon_name} histogram")
-        plt.xlabel(self.recon_name)
-        y = 0
-        labels = []
-        for y, path in enumerate(self.all_paths):
-            file_name = Path(path).name
-            labels.append(f"Reconstruction for {file_name} - {self.recon_name}")
-            y+=1
-        plt.legend(labels, loc="upper right")
-
-        file_path = os.path.join(folder_name, f"Test_{self.recon_name}_from_{self.contr_name}.png")
-        plt.savefig(file_path)
-        plt.clf()
-        print(f"File saved to {file_path}")
+            plt.savefig(file_path)
+            plt.clf()
+            print(f"File saved to {file_path}")
 
 object = Plotter(100, 50, 20, 1)
-print(object.load_data())
-print(object.set_parameters("trueMETx", "METx"))
+print(object.load_data("data/Higgs.csv", "data/Z0.csv"))
+print(object.set_parameters())
 print(object.batch(250))
 print(object.control_plot())
 print(object.resolution_plot())
