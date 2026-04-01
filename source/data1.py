@@ -41,13 +41,22 @@ class Plotter:
         self.all_paths = []
         self.all_data = []
 
+        posible_data = []
+        folder_path = self.base_path / "data"
+        posible_data = os.listdir(folder_path)
+        print(posible_data)
+
+
         if len(relative_paths) == 0:
             relative_paths_list = []
             while True:
                 new = input("Add new path (end to finish): ")
                 if new.lower() == "end":
                     break
-                relative_paths_list.append("data\\" +new)
+                if new in posible_data:
+                    relative_paths_list.append("data\\" +new)
+                else:
+                    print("Wrong path, give another")
             relative_paths = relative_paths_list
 
         for rel_path in relative_paths:
@@ -71,6 +80,8 @@ class Plotter:
 
         self.contr_name = []
         self.recon_name = []
+
+        df = pd.read_csv(self.all_data)
 
 
         if contr_name is None or recon_name is None:
@@ -247,8 +258,8 @@ class Plotter:
             print(f"File saved to {file_path}")
 
 object = Plotter(100, 50, 20, 1)
-print(object.load_data("data/Higgs.csv", "data/Z0.csv"))
-print(object.set_parameters())
+print(object.load_data())
+print(object.set_parameters("trueMETx", "METx"))
 print(object.batch(250))
 print(object.control_plot())
 print(object.resolution_plot())
