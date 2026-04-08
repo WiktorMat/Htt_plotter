@@ -37,6 +37,8 @@ class Plotter:
         self.base_path = Path(__file__).resolve().parent.parent
         self.all_data = []
 
+
+    ###Loading data files
     def load_data(self, *relative_paths):
         self.all_paths = []
         self.all_data = []
@@ -86,16 +88,28 @@ class Plotter:
                 print(f"File {full_path} does not exist")
 
 
+    ###Seting parameters that we want to create histogram
     def set_parameters(self, contr_name=None, recon_name=None):
         self.contr_name = []
         self.recon_name = []
 
         all_columns = set()
         for item in self.all_data:
-            df = item["data"]
-            all_columns.update(df.columns)
+            all_columns.update(item["data"].columns)
 
-        print(all_columns)
+        import SELECTION
+
+        df_filtered = SELECTION.SELECT(r"D:\Praktyki_zawodowe\Htt_plotter\data\beef__Events.parquet")
+
+        for item in self.all_data:
+            df = item["data"]
+            df_filtered = SELECTION.SELECT(df)  
+            item["data"] = df_filtered
+
+        # print("\n--- Data Preview (parquet) ---")
+        # print(df.head())
+        # print("\n--- Columns ---")
+        # print(df.columns.tolist())
 
         if contr_name is None or recon_name is None:
             while True:
@@ -128,7 +142,7 @@ class Plotter:
         for i, c in enumerate(self.contr_name):
             print(f"Control file is {c}, and resolution is {self.recon_name[i]}")
 
-
+    ###Batch processing
     def batch(self, batch_size=None):
         if batch_size is None:
             self.batch_size = int(input("Set batch size: "))
@@ -166,7 +180,7 @@ class Plotter:
                     "data": batch_df
                 })
 
-
+    ###Control Plotting
     def control_plot(self):
         if len(self.all_data) == 0:
             print("No data in all_data")
@@ -215,6 +229,8 @@ class Plotter:
 
             plt.title(f"Control {contr_name} histogram")
             plt.xlabel(contr_name)
+            plt.ylabel("Amount")
+            plt.grid(True)
             plt.legend([f"From {label} - {contr_name}" for label in labels], loc="upper right")
 
             file_path = os.path.join(folder_name, f"{contr_name}.png")
@@ -222,6 +238,7 @@ class Plotter:
             plt.clf()
             print(f"File saved to {file_path}")
 
+    ###Resolution Plotting
     def resolution_plot(self):
         if not hasattr(self, "batch_dfs") or len(self.batch_dfs) == 0:
             print("No batch data available")
@@ -269,6 +286,8 @@ class Plotter:
 
             plt.title(f"Resolution {recon_name} histogram")
             plt.xlabel(recon_name)
+            plt.ylabel("Amount")
+            plt.grid(True)
             plt.legend(
                 [f"From {l} - {recon_name}" for l in labels],
                 loc="upper right"
