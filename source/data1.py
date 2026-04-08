@@ -43,6 +43,15 @@ class Plotter:
         self.all_paths = []
         self.all_data = []
 
+        # import json
+        # config_path = self.base_path / "source/" / "files.json"
+        # with open(config_path) as f:
+        #     files_by_event = json.load(f)
+
+        # for event, files in files_by_event.items():
+        #     print("Event:", event)
+        #     print("Files:", files)
+
         folder_path = self.base_path / "data"
         posible_data = os.listdir(folder_path)
         print(posible_data)
