@@ -41,11 +41,9 @@ class Plotter:
         self.all_paths = []
         self.all_data = []
 
-        posible_data = []
         folder_path = self.base_path / "data"
         posible_data = os.listdir(folder_path)
         print(posible_data)
-
 
         if len(relative_paths) == 0:
             relative_paths_list = []
@@ -54,26 +52,38 @@ class Plotter:
                 if new.lower() == "end":
                     break
                 if new in posible_data:
-                    relative_paths_list.append("data\\" +new)
+                    relative_paths_list.append(new)
                 else:
                     print("Wrong path, give another")
             relative_paths = relative_paths_list
 
         for rel_path in relative_paths:
-            full_path = self.base_path / "data\\" / rel_path
+            full_path = folder_path / rel_path
             self.all_paths.append(rel_path)
 
             if full_path.exists():
                 try:
-                    df = pd.read_csv(full_path)
-                    self.all_data.append({"name": full_path.name, "data": df})
+                    ext = full_path.suffix.lower()
+
+                    if ext == ".csv":
+                        df = pd.read_csv(full_path)
+                    elif ext == ".parquet":
+                        df = pd.read_parquet(full_path)
+                    else:
+                        print(f"Unsupported file type: {full_path.name}")
+                        continue
+
+                    self.all_data.append({
+                        "name": full_path.name,
+                        "data": df
+                    })
+
                     print(f"Loaded: {full_path.name}")
+
                 except Exception as e:
                     print(f"Error while loading {full_path.name}: {e}")
             else:
                 print(f"File {full_path} does not exist")
-            
-
 
 
     def set_parameters(self, contr_name=None, recon_name=None):
@@ -84,6 +94,8 @@ class Plotter:
         for item in self.all_data:
             df = item["data"]
             all_columns.update(df.columns)
+
+        print(all_columns)
 
         if contr_name is None or recon_name is None:
             while True:
@@ -111,7 +123,7 @@ class Plotter:
                 self.contr_name.append(contr_name)
                 self.recon_name.append(recon_name)
             else:
-                print("Given columns do not exist!")
+                print("Given columns do not exist")
 
         for i, c in enumerate(self.contr_name):
             print(f"Control file is {c}, and resolution is {self.recon_name[i]}")
@@ -253,7 +265,7 @@ class Plotter:
                 bottom_counts += counts
                 labels.append(file_name)
 
-            contr_name, recon_name = key.split("_")
+            contr_name, recon_name = key.rsplit("_", 1)
 
             plt.title(f"Resolution {recon_name} histogram")
             plt.xlabel(recon_name)
@@ -270,7 +282,7 @@ class Plotter:
             print(f"File saved to {file_path}")
 
 object = Plotter(100, 50, 20, 1)
-print(object.load_data("Higgs.csv", "Z0.csv"))
+print(object.load_data())
 print(object.set_parameters())
 print(object.batch(250))
 print(object.control_plot())
