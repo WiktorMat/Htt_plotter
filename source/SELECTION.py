@@ -1,5 +1,5 @@
 import pandas as pd
-from CONFIG import *
+from config import *
 
 def selection(df):
     conditions = []
@@ -26,7 +26,8 @@ def selection(df):
         conditions.append(abs(df['ip_LengthSig_1']) > IP_LENSIG_1_CUT)
 
     if not conditions:
-        return pd.Series([True]*len(df), index=df.index)
+        print("No conditions were found")
+        return conditions
 
     mask = conditions[0]
     for cond in conditions[1:]:

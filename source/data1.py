@@ -97,13 +97,13 @@ class Plotter:
         for item in self.all_data:
             all_columns.update(item["data"].columns)
 
-        import SELECTION
+        import selection
 
-        df_filtered = SELECTION.SELECT(r"D:\Praktyki_zawodowe\Htt_plotter\data\beef__Events.parquet")
+        df_filtered = selection.SELECT(r"D:\Praktyki_zawodowe\Htt_plotter\data\beef__Events.parquet")
 
         for item in self.all_data:
             df = item["data"]
-            df_filtered = SELECTION.SELECT(df)  
+            df_filtered = selection.SELECT(df)  
             item["data"] = df_filtered
 
         # print("\n--- Data Preview (parquet) ---")
