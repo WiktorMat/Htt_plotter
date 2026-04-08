@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import os
 from pathlib import Path
 
-higgs = pd.read_csv("D:\Praktyki_zawodowe\Htt_plotter/data/Higgs.csv")
+# higgs = pd.read_csv("D:\Praktyki_zawodowe\Htt_plotter/data/Higgs.csv")
 
 # def funk_bar(wybrane):
 
@@ -60,7 +60,7 @@ class Plotter:
             relative_paths = relative_paths_list
 
         for rel_path in relative_paths:
-            full_path = self.base_path / rel_path
+            full_path = self.base_path / "data\\" / rel_path
             self.all_paths.append(rel_path)
 
             if full_path.exists():
@@ -77,17 +77,26 @@ class Plotter:
 
 
     def set_parameters(self, contr_name=None, recon_name=None):
-
         self.contr_name = []
         self.recon_name = []
 
-        df = pd.read_csv(self.all_data)
-
+        all_columns = set()
+        for item in self.all_data:
+            df = item["data"]
+            all_columns.update(df.columns)
 
         if contr_name is None or recon_name is None:
             while True:
                 contr_name_input = input("Set control: ")
                 recon_name_input = input("Set reconstruction: ")
+
+                if contr_name_input not in all_columns:
+                    print(f"Column {contr_name_input} does not exist in any file")
+                    continue
+
+                if recon_name_input not in all_columns:
+                    print(f"Column {recon_name_input} does not exist in any file")
+                    continue
 
                 self.contr_name.append(contr_name_input)
                 self.recon_name.append(recon_name_input)
@@ -98,8 +107,11 @@ class Plotter:
                 if end.lower() == "end":
                     break
         else:
-            self.contr_name.append(contr_name)
-            self.recon_name.append(recon_name)
+            if contr_name in all_columns and recon_name in all_columns:
+                self.contr_name.append(contr_name)
+                self.recon_name.append(recon_name)
+            else:
+                print("Given columns do not exist!")
 
         for i, c in enumerate(self.contr_name):
             print(f"Control file is {c}, and resolution is {self.recon_name[i]}")
@@ -258,8 +270,8 @@ class Plotter:
             print(f"File saved to {file_path}")
 
 object = Plotter(100, 50, 20, 1)
-print(object.load_data())
-print(object.set_parameters("trueMETx", "METx"))
+print(object.load_data("Higgs.csv", "Z0.csv"))
+print(object.set_parameters())
 print(object.batch(250))
 print(object.control_plot())
 print(object.resolution_plot())
