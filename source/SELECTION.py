@@ -29,9 +29,9 @@ def selection(df):
         print("No conditions were found")
         return pd.Series(True, index=df.index)
 
-    mask = conditions[0]
+    mask = conditions[0].astype(bool)
     for cond in conditions[1:]:
-        mask &= cond
+        mask &= cond.astype(bool)
     return mask
 
 def SELECT(df_or_path):
@@ -40,3 +40,16 @@ def SELECT(df_or_path):
     else:
         df = df_or_path.copy()
     return df[selection(df)]
+
+def plotting(df):
+    columns_to_check = [METX, TRUE_METX, METY, TRUE_METY, PT_2, PT_1]
+    columns = []
+
+    for col in columns_to_check:
+        if col in df.columns:
+            columns.append(df[col])
+    
+    if not columns:
+        print("No plotting columns were found")
+    
+    return columns

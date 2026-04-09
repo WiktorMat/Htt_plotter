@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import os
 from pathlib import Path
 import json
-import selection
+from selection  import *
 
 # higgs = pd.read_csv("D:\Praktyki_zawodowe\Htt_plotter/data/Higgs.csv")
 
@@ -98,66 +98,36 @@ class Plotter:
                 print(f"File {full_path} does not exist")
 
 
-    ###Seting parameters that we want to create histogram
+    ###Seting parameters
     def set_parameters(self, contr_name=None, recon_name=None):
         self.contr_name = []
         self.recon_name = []
-
-        all_columns = set()
-
-        for item in self.all_data:
-            all_columns.update(item["data"].columns)
-
+        selection_columns = set()
         for item in self.all_data:
             df = item["data"]
+            cols = plotting(df)
+            selection_columns.update([s.name for s in cols])
 
-            try:
-                df_filtered = selection.SELECT(df)
+        if not selection_columns:
+            print("No plotting columns found in any data.")
+            return
 
-                if df_filtered is not None and len(df_filtered) > 0:
-                    print(f"{item['name']}: {len(df)} -> {len(df_filtered)}")
-                    item["filtered_data"] = df_filtered
-                else:
-                    print(f"{item['name']}: selection empty → keeping original")
 
-            except Exception as e:
-                print(f"{item['name']}: selection skipped ({e})")
-
-        # print("\n--- Data Preview (parquet) ---")
-        # print(df.head())
-        # print("\n--- Columns ---")
-        # print(df.columns.tolist())
-
-        if contr_name is None or recon_name is None:
-            while True:
-                contr_name_input = input("Set control: ")
-                recon_name_input = input("Set reconstruction: ")
-
-                if contr_name_input not in all_columns:
-                    print(f"Column {contr_name_input} does not exist in any file")
-                    continue
-
-                if recon_name_input not in all_columns:
-                    print(f"Column {recon_name_input} does not exist in any file")
-                    continue
-
-                self.contr_name.append(contr_name_input)
-                self.recon_name.append(recon_name_input)
-
-                print(f"Added: Control = {contr_name_input}, Resolution = {recon_name_input}")
-
-                end = input("Write 'end' to finish, or press ENTER to add more: ")
-                if end.lower() == "end":
-                    break
-        else:
-            if contr_name in all_columns and recon_name in all_columns:
-                self.contr_name.append(contr_name)
-                self.recon_name.append(recon_name)
+        for i, col in enumerate(selection_columns):
+            if i % 2 == 0:
+                self.recon_name.append(col)
             else:
-                print("Given columns do not exist")
+                self.contr_name.append(col)
+
+        all_columns = set(col for item in self.all_data for col in item["data"].columns)
+        if contr_name and contr_name in all_columns:
+            self.contr_name.append(contr_name)
+        if recon_name and recon_name in all_columns:
+            self.recon_name.append(recon_name)
 
         for i, c in enumerate(self.contr_name):
-            print(f"Control file is {c}, and resolution is {self.recon_name[i]}")
+            r = self.recon_name[i] if i < len(self.recon_name) else "N/A"
+            print(f"Control file is {c}, and resolution is {r}")
 
     ###Batch processing
     def batch(self, batch_size=None):

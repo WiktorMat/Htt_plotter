@@ -1,3 +1,4 @@
+###Selections
 PT_1_CUT = 25
 PT_2_CUT = 20
 ETA_1_CUT = 2.4
@@ -8,3 +9,11 @@ IDE_2_CUT = 2
 IDMU_2_CUT = 4
 ISO_1_CUT = 0.15
 IP_LENSIG_1_CUT = 1
+
+###Plotting
+TRUE_METX = "trueMETx"
+METX = "METx"
+TRUE_METY = "trueMETy"
+METY = "METy"
+PT_1 = "pt_1"
+PT_2 = "pt_2"
