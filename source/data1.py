@@ -40,8 +40,7 @@ class Plotter:
         self.all_data = []
         self.event_colors = {
             "Higgs": "blue",
-            "Z0": "lime",
-            "Beef__events": "red"
+            "Z0": "lime"
         }
 
 
@@ -66,58 +65,58 @@ class Plotter:
                     print("Wrong path, give another")
             relative_paths = relative_paths_list
 
-        for rel_path in relative_paths:
-            full_path = folder_path / rel_path
-            self.all_paths.append(rel_path)
+        json_path = self.base_path / "source\\" / "files.json"
+        with open(json_path) as f:
+            files_dict = json.load(f)
 
-            if full_path.exists():
-                try:
-                    ext = full_path.suffix.lower()
+        for event, file_list in files_dict.items():
+            for file_name in file_list:
+                full_path = self.base_path / "data" / file_name
+                self.all_paths.append(file_name)
 
-                    if ext == ".csv":
-                        df = pd.read_csv(full_path)
-                    elif ext == ".parquet":
-                        df = pd.read_parquet(full_path)
-                    else:
-                        print(f"Unsupported file type: {full_path.name}")
-                        continue
+                if full_path.exists():
+                    try:
+                        ext = full_path.suffix.lower()
+                        if ext == ".csv":
+                            df = pd.read_csv(full_path)
+                        elif ext == ".parquet":
+                            df = pd.read_parquet(full_path)
+                        else:
+                            print(f"Unsupported file type: {full_path.name}")
+                            continue
 
-                    event = full_path.stem
+                        self.all_data.append({
+                            "name": full_path.name,
+                            "data": df,
+                            "event": event
+                        })
 
-                    self.all_data.append({
-                        "name": full_path.name,
-                        "data": df,
-                        "event": event
-                    })
+                        print(f"Loaded: {full_path.name}")
 
-                    print(f"Loaded: {full_path.name}")
-
-                except Exception as e:
-                    print(f"Error while loading {full_path.name}: {e}")
-            else:
-                print(f"File {full_path} does not exist")
+                    except Exception as e:
+                        print(f"Error while loading {full_path.name}: {e}")
+                else:
+                    print(f"File {full_path} does not exist")
 
 
     ###Seting parameters
     def set_parameters(self, contr_name=None, recon_name=None):
         self.contr_name = []
         self.recon_name = []
-        selection_columns = set()
+
         for item in self.all_data:
             df = item["data"]
             cols = plotting(df)
-            selection_columns.update([s.name for s in cols])
 
-        if not selection_columns:
+            self.contr_name.extend(cols.get("control", []))
+            self.recon_name.extend(cols.get("resolution", []))
+
+        self.contr_name = list(dict.fromkeys(self.contr_name))
+        self.recon_name = list(dict.fromkeys(self.recon_name))
+
+        if not self.contr_name and not self.recon_name:
             print("No plotting columns found in any data.")
-            return
 
-
-        for i, col in enumerate(selection_columns):
-            if i % 2 == 0:
-                self.recon_name.append(col)
-            else:
-                self.contr_name.append(col)
 
         all_columns = set(col for item in self.all_data for col in item["data"].columns)
         if contr_name and contr_name in all_columns:
@@ -162,19 +161,7 @@ class Plotter:
 
                 batch_df = pd.concat(batches, axis=1)
 
-                file_event_map = {
-                    "higgs": "Higgs",
-                    "z0": "Z0",
-                    "beef": "Beef__events"
-                }
-
-                file_name_lower = file_name.lower()
-                event_name = "unknown"
-
-                for key_fragment, event in file_event_map.items():
-                    if key_fragment in file_name_lower:
-                        event_name = event
-                        break
+                event_name = item.get("event", "unknown")
 
                 self.batch_dfs[key].append({
                     "name": file_name,
@@ -190,9 +177,6 @@ class Plotter:
 
         folder_name = "control_plots"
         os.makedirs(folder_name, exist_ok=True)
-
-        # colors = ["blue", "lime", "red", "orange", "purple", "cyan", "magenta"]
-
 
 
         for contr_name in self.contr_name:
@@ -255,8 +239,6 @@ class Plotter:
 
         folder_name = "resolution_plots"
         os.makedirs(folder_name, exist_ok=True)
-
-        # colors = ["blue", "lime", "red", "orange", "purple", "cyan", "magenta"]
 
         for key in self.batch_dfs:
             plt.figure()

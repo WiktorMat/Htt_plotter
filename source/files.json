@@ -3,9 +3,7 @@
         "Higgs.csv"
     ],
     "Z0": [
-        "Z0.csv"
-    ],
-    "Beef__events": [
+        "Z0.csv",
         "beef__Events.parquet"
     ]
 }

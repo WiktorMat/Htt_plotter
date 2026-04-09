@@ -11,9 +11,5 @@ ISO_1_CUT = 0.15
 IP_LENSIG_1_CUT = 1
 
 ###Plotting
-TRUE_METX = "trueMETx"
-METX = "METx"
-TRUE_METY = "trueMETy"
-METY = "METy"
-PT_1 = "pt_1"
-PT_2 = "pt_2"
+CONTROL = ["trueMETx", "trueMETy", "pt_1"]
+RESOL = ["METx", "METy", "pt_2"]

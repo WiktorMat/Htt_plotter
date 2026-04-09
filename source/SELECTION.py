@@ -42,14 +42,10 @@ def SELECT(df_or_path):
     return df[selection(df)]
 
 def plotting(df):
-    columns_to_check = [METX, TRUE_METX, METY, TRUE_METY, PT_2, PT_1]
-    columns = []
+    columns_control = [col for col in CONTROL if col in df.columns]
+    columns_resol = [col for col in RESOL if col in df.columns]
 
-    for col in columns_to_check:
-        if col in df.columns:
-            columns.append(df[col])
-    
-    if not columns:
-        print("No plotting columns were found")
-    
-    return columns
+    if not columns_control and not columns_resol:
+        print("No plotting columns were found in this DataFrame")
+
+    return {"control": columns_control, "resolution": columns_resol}
