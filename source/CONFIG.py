@@ -1,15 +1,14 @@
-###Selections
-PT_1_CUT = 25
-PT_2_CUT = 20
-ETA_1_CUT = 2.4
-ETA_2_CUT = 2.3
-DECAYMODE_2_CUT = 1
-IDJET_2_CUT = 5
-IDE_2_CUT = 2
-IDMU_2_CUT = 4
-ISO_1_CUT = 0.15
-IP_LENSIG_1_CUT = 1
+###Files .parquet
+from pathlib import Path
 
-###Plotting
-CONTROL = ["trueMETx", "trueMETy", "pt_1"]
-RESOL = ["METx", "METy", "pt_2"]
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+BASE_PATH = PROJECT_ROOT / "data" / "Run3_2024" / "mt"
+
+process = [
+    "DYto2Mu-2Jets_Bin-0J-MLL-50",
+    "DYto2Tau-2Jets_Bin-0J-MLL-50",
+    "TTto2L2Nu",
+    "WtoTauNu-2Jets"
+]
+process = ["DYto2Mu-2Jets_Bin-0J-MLL-50", "DYto2Tau-2Jets_Bin-0J-MLL-50", "TTto2L2Nu", "WtoTauNu-2Jets"]

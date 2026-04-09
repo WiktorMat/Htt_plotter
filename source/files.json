@@ -1,9 +1,9 @@
 {
-    "Higgs": [
-        "Higgs.csv"
-    ],
+    "Higgs": [],
     "Z0": [
-        "Z0.csv",
-        "beef__Events.parquet"
+        "D:\\Praktyki_zawodowe\\Htt_plotter\\data\\Run3_2024\\mt\\DYto2Mu-2Jets_Bin-0J-MLL-50\\nominal\\0d2f7550-208c-11f0-a9b8-68bce183beef_%2FEvents%3B1_0-197003.parquet",
+        "D:\\Praktyki_zawodowe\\Htt_plotter\\data\\Run3_2024\\mt\\DYto2Tau-2Jets_Bin-0J-MLL-50\\nominal\\0060e1ea-962c-11f0-8f5e-12803c0abeef_%2FEvents%3B1_0-168672.parquet",
+        "D:\\Praktyki_zawodowe\\Htt_plotter\\data\\Run3_2024\\mt\\TTto2L2Nu\\nominal\\02b91bd4-2088-11f0-bde3-a1bfe183beef_%2FEvents%3B1_0-172840.parquet",
+        "D:\\Praktyki_zawodowe\\Htt_plotter\\data\\Run3_2024\\mt\\WtoTauNu-2Jets\\nominal\\00023016-0def-11f0-81cb-e8803c0abeef_%2FEvents%3B1_0-149802.parquet"
     ]
 }

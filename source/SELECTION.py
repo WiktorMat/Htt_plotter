@@ -1,5 +1,7 @@
 import pandas as pd
+import os
 from config import *
+from config2 import *
 
 def selection(df):
     conditions = []
@@ -49,3 +51,20 @@ def plotting(df):
         print("No plotting columns were found in this DataFrame")
 
     return {"control": columns_control, "resolution": columns_resol}
+
+
+def Stack_together(processes, nominal):
+    results = {}
+    
+    for process in processes:
+        folder_path = os.path.join(BASE_PATH, process, nominal)
+        
+        if not os.path.exists(folder_path):
+            print(f"Folder nie istnieje: {folder_path}")
+            results[process] = False
+            continue
+        
+        parquet_files = [f for f in os.listdir(folder_path) if f.endswith('.parquet')]
+        results[process] = len(parquet_files) > 1
+    
+    return results
