@@ -3,6 +3,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 from pathlib import Path
+import json
+import selection
 
 # higgs = pd.read_csv("D:\Praktyki_zawodowe\Htt_plotter/data/Higgs.csv")
 
@@ -36,21 +38,17 @@ class Plotter:
         self.contr = []
         self.base_path = Path(__file__).resolve().parent.parent
         self.all_data = []
+        self.event_colors = {
+            "Higgs": "blue",
+            "Z0": "lime",
+            "Beef__events": "red"
+        }
 
 
     ###Loading data files
     def load_data(self, *relative_paths):
         self.all_paths = []
         self.all_data = []
-
-        # import json
-        # config_path = self.base_path / "source/" / "files.json"
-        # with open(config_path) as f:
-        #     files_by_event = json.load(f)
-
-        # for event, files in files_by_event.items():
-        #     print("Event:", event)
-        #     print("Files:", files)
 
         folder_path = self.base_path / "data"
         posible_data = os.listdir(folder_path)
@@ -84,9 +82,12 @@ class Plotter:
                         print(f"Unsupported file type: {full_path.name}")
                         continue
 
+                    event = full_path.stem
+
                     self.all_data.append({
                         "name": full_path.name,
-                        "data": df
+                        "data": df,
+                        "event": event
                     })
 
                     print(f"Loaded: {full_path.name}")
@@ -103,17 +104,24 @@ class Plotter:
         self.recon_name = []
 
         all_columns = set()
+
         for item in self.all_data:
             all_columns.update(item["data"].columns)
 
-        import selection
-
-        df_filtered = selection.SELECT(r"D:\Praktyki_zawodowe\Htt_plotter\data\beef__Events.parquet")
-
         for item in self.all_data:
             df = item["data"]
-            df_filtered = selection.SELECT(df)  
-            item["data"] = df_filtered
+
+            try:
+                df_filtered = selection.SELECT(df)
+
+                if df_filtered is not None and len(df_filtered) > 0:
+                    print(f"{item['name']}: {len(df)} -> {len(df_filtered)}")
+                    item["filtered_data"] = df_filtered
+                else:
+                    print(f"{item['name']}: selection empty → keeping original")
+
+            except Exception as e:
+                print(f"{item['name']}: selection skipped ({e})")
 
         # print("\n--- Data Preview (parquet) ---")
         # print(df.head())
@@ -165,7 +173,7 @@ class Plotter:
             self.batch_dfs[key] = []
 
             for item in self.all_data:
-                df = item["data"]
+                df = item.get("filtered_data", item["data"])
                 file_name = item["name"]
 
                 if contr_name not in df.columns or recon_name not in df.columns:
@@ -184,9 +192,24 @@ class Plotter:
 
                 batch_df = pd.concat(batches, axis=1)
 
+                file_event_map = {
+                    "higgs": "Higgs",
+                    "z0": "Z0",
+                    "beef": "Beef__events"
+                }
+
+                file_name_lower = file_name.lower()
+                event_name = "unknown"
+
+                for key_fragment, event in file_event_map.items():
+                    if key_fragment in file_name_lower:
+                        event_name = event
+                        break
+
                 self.batch_dfs[key].append({
                     "name": file_name,
-                    "data": batch_df
+                    "data": batch_df,
+                    "event": event_name
                 })
 
     ###Control Plotting
@@ -198,7 +221,9 @@ class Plotter:
         folder_name = "control_plots"
         os.makedirs(folder_name, exist_ok=True)
 
-        colors = ["blue", "lime", "red", "orange", "purple", "cyan", "magenta"]
+        # colors = ["blue", "lime", "red", "orange", "purple", "cyan", "magenta"]
+
+
 
         for contr_name in self.contr_name:
             plt.figure()
@@ -206,12 +231,17 @@ class Plotter:
             labels = []
 
             for i, item in enumerate(self.all_data):
-                df = item["data"]
+                df = item.get("filtered_data", item["data"])
                 file_name = item["name"]
 
                 if contr_name not in df.columns:
                     print(f"File {file_name} does not contain {contr_name}, skipping")
                     continue
+
+                event = item.get("event", "unknown")
+                event = event.strip()
+                event = event.capitalize()
+                color = self.event_colors.get(event, "black")
 
                 contr = df[contr_name]
                 counts, bins = np.histogram(
@@ -228,7 +258,7 @@ class Plotter:
                     counts,
                     width=np.diff(bins),
                     bottom=bottom_counts,
-                    color=colors[i % len(colors)],
+                    color = color,
                     edgecolor="black",
                     align="edge",
                 )
@@ -256,7 +286,7 @@ class Plotter:
         folder_name = "resolution_plots"
         os.makedirs(folder_name, exist_ok=True)
 
-        colors = ["blue", "lime", "red", "orange", "purple", "cyan", "magenta"]
+        # colors = ["blue", "lime", "red", "orange", "purple", "cyan", "magenta"]
 
         for key in self.batch_dfs:
             plt.figure()
@@ -275,6 +305,11 @@ class Plotter:
                     range=(-self.xlim_resol, self.xlim_resol)
                 )
 
+                event = item.get("event", "unknown")
+                event = event.strip()
+                event = event.capitalize()
+                color = self.event_colors.get(event, "black")
+
                 if bottom_counts is None:
                     bottom_counts = np.zeros_like(counts)
 
@@ -283,7 +318,7 @@ class Plotter:
                     counts,
                     width=np.diff(bins),
                     bottom=bottom_counts,
-                    color=colors[i % len(colors)],
+                    color = color,
                     edgecolor="black",
                     align="edge",
                 )

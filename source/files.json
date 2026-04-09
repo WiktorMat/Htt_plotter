@@ -4,5 +4,8 @@
     ],
     "Z0": [
         "Z0.csv"
+    ],
+    "Beef__events": [
+        "beef__Events.parquet"
     ]
 }

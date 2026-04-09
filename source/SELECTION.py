@@ -27,7 +27,7 @@ def selection(df):
 
     if not conditions:
         print("No conditions were found")
-        return conditions
+        return pd.Series(True, index=df.index)
 
     mask = conditions[0]
     for cond in conditions[1:]:
