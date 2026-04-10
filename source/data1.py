@@ -3,6 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 from pathlib import Path
+from itertools import cycle
 import json
 from selection import *
 from config import process, BASE_PATH
@@ -17,10 +18,13 @@ class Plotter:
         self.contr = []
         self.project_root = Path(__file__).resolve().parent.parent
         self.all_data = []
-        self.event_colors = {
-                "Higgs": "blue",
-                "Z0": "lime"
-            }
+        self.event_colors = {}
+        self._color_cycle = cycle(EVENT_COLOR_PALETTE)
+
+    def get_event_color(self, event):
+        if event not in self.event_colors:
+            self.event_colors[event] = next(self._color_cycle)
+        return self.event_colors[event]
 
     ### Generate JSON automatically from folders in config/process
     def generate_json_from_selection(self, nominal="nominal"):
@@ -28,20 +32,27 @@ class Plotter:
         data_folder = Path(BASE_PATH)
 
         for proc in process:
+            if proc not in files_dict:
+                files_dict[proc] = []
+
             folder = data_folder / proc / nominal
             if not folder.exists():
-                print(f"Folder doesn't exists: {folder}")
+                print(f"Folder doesn't exist: {folder}")
                 continue
+
             for f in os.listdir(folder):
                 if not f.endswith(".parquet"):
                     continue
+
                 full_path = str(folder / f)
+
                 if "Higgs" in f:
                     files_dict["Higgs"].append(full_path)
+
                 elif "Z0" in f or "DYto2" in f or "TT" in f or "Wto" in f:
                     files_dict["Z0"].append(full_path)
-                else:
-                    files_dict["Z0"].append(full_path)
+
+                files_dict[proc].append(full_path)
 
         project_root = Path(__file__).resolve().parent.parent
         source_folder = project_root / "source"
@@ -182,8 +193,8 @@ class Plotter:
                     continue
 
                 file_name = item["name"]
-                event = file_to_event.get(file_name, item.get("event", "unknown")).capitalize()
-                color = self.event_colors.get(event, "black")
+                event = file_to_event.get(file_name, item.get("event", "unknown"))
+                color = self.get_event_color(event)
 
                 contr = df[contr_name]
                 counts, bins = np.histogram(
@@ -244,8 +255,8 @@ class Plotter:
                 values = batch_df.values.flatten()
                 counts, bins = np.histogram(values, bins=self.bins, range=(-self.xlim_resol, self.xlim_resol))
 
-                event = file_to_event.get(file_name, item.get("event", "unknown")).capitalize()
-                color = self.event_colors.get(event, "black")
+                event = file_to_event.get(file_name, item.get("event", "unknown"))
+                color = self.get_event_color(event)
 
                 if bottom_counts is None:
                     bottom_counts = np.zeros_like(counts)

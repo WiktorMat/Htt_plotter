@@ -13,3 +13,19 @@ IP_LENSIG_1_CUT = 1
 ###Plotting
 CONTROL = ["trueMETx", "trueMETy", "pt_1", "eta_1"]
 RESOL = ["METx", "METy", "pt_2", "eta_2"]
+
+
+###Colors
+EVENT_COLOR_PALETTE = [
+    "blue",
+    "green",
+    "orange",
+    "red",
+    "purple",
+    "cyan",
+    "magenta",
+    "yellow",
+    "brown",
+    "pink",
+    "gray",
+]
