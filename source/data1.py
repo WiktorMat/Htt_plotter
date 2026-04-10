@@ -6,6 +6,7 @@ from pathlib import Path
 from selection import *
 from config import process, BASE_PATH
 import json
+import matplotlib.gridspec as gridspec
 
 
 class Plotter:
@@ -56,7 +57,7 @@ class Plotter:
             try:
                 item["filtered_data"] = SELECT(df)
             except Exception as e:
-                print(f"[WARN] Selection failed for {item['name']}: {e}")
+                print(f" Selection failed for {item['name']}: {e}")
                 item["filtered_data"] = df
 
     ### Load data
@@ -77,13 +78,13 @@ class Plotter:
                 path = (self.project_root / d).resolve()
 
                 if not path.exists():
-                    print(f"[WARN] Missing path: {path}")
+                    print(f" Missing path: {path}")
                     continue
 
                 parquet_files = list(Path(path).rglob("*.parquet"))
                 total_files += len(parquet_files)
 
-                print(f"[LOAD] {sample_name}: {len(parquet_files)} files in {path}")
+                print(f"{sample_name}: {len(parquet_files)} files in {path}")
 
                 for file in parquet_files:
                     try:
@@ -101,11 +102,11 @@ class Plotter:
                     except Exception as e:
                         print(f"[ERROR] {file}: {e}")
 
-        print(f"[INFO] Loaded samples: {set(x['sample'] for x in self.all_data)}")
+        print(f"Loaded samples: {set(x['sample'] for x in self.all_data)}")
 
     ### Set parameters
     def set_parameters(self):
-        print("[INFO] Setting parameters...")
+        print("Setting parameters")
 
         self.contr_name = []
         self.recon_name = []
@@ -116,7 +117,7 @@ class Plotter:
             try:
                 cols = plotting(df)
             except Exception as e:
-                print(f"[WARN] plotting() failed for {item['name']}: {e}")
+                print(f" plotting() failed for {item['name']}: {e}")
                 continue
 
             self.contr_name.extend(cols.get("control", []))
@@ -125,12 +126,12 @@ class Plotter:
         self.contr_name = list(dict.fromkeys(self.contr_name))
         self.recon_name = list(dict.fromkeys(self.recon_name))
 
-        print(f"[INFO] Control vars: {len(self.contr_name)}")
-        print(f"[INFO] Resolution vars: {len(self.recon_name)}")
+        print(f"Control vars: {len(self.contr_name)}")
+        print(f"Resolution vars: {len(self.recon_name)}")
 
     ### Batch processing
     def batch(self, batch_size=250):
-        print("[INFO] Creating batches...")
+        print("Creating batches")
 
         self.batch_dfs = {}
 
@@ -277,6 +278,82 @@ class Plotter:
             )
             plt.close()
 
+    def Plot_MC_Data_Agrement(self):
+        os.makedirs("mc_data_plots", exist_ok=True)
+
+        var = self.contr_name[0] if hasattr(self, "contr_name") and self.contr_name else "m_vis"
+
+        bin_edges = np.linspace(-self.xlim_ctrl, self.xlim_ctrl, self.bins + 1)
+        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+
+        mc_samples = {}
+        data_counts = None
+        data_var = None
+
+        for item in self.all_data:
+            df = item.get("filtered_data", item["data"])
+            if var not in df.columns:
+                continue
+
+            values = df[var].dropna().to_numpy()
+            if len(values) == 0:
+                continue
+
+            counts, _ = np.histogram(values, bins=bin_edges)
+
+            if item.get("kind", "mc") == "data":
+                if data_counts is None:
+                    data_counts = counts.astype(float)
+                else:
+                    data_counts += counts.astype(float)
+            else:
+                name = item["sample"]
+                if name not in mc_samples:
+                    mc_samples[name] = np.zeros_like(counts, dtype=float)
+                mc_samples[name] += counts.astype(float) * item.get("scale", 1.0)
+
+        if data_counts is None:
+            print("No data found for MC/Data agreement plot")
+            return
+
+        total_mc = np.zeros_like(data_counts)
+        for v in mc_samples.values():
+            total_mc += v
+
+
+        fig = plt.figure(figsize=(7, 6))
+        gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1], hspace=0.05)
+
+        ax = fig.add_subplot(gs[0])
+        rax = fig.add_subplot(gs[1], sharex=ax)
+
+        bottom = np.zeros_like(total_mc)
+
+        for name, vals in mc_samples.items():
+            ax.bar(bin_edges[:-1], vals, width=np.diff(bin_edges), bottom=bottom, align="edge", label=name)
+            bottom += vals
+
+        ax.errorbar(bin_centers, data_counts, yerr=np.sqrt(data_counts), fmt="o", color="black", label="Data")
+        ax.step(bin_edges[:-1], total_mc, where="post", color="black", linewidth=1, label="MC total")
+
+        ax.set_ylabel("Events")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        ratio = np.divide(data_counts, total_mc, out=np.zeros_like(data_counts, dtype=float), where=total_mc != 0)
+
+        rax.axhline(1.0, linestyle="--", color="black")
+        rax.plot(bin_centers, ratio, "o", color="black")
+
+        rax.set_ylabel("Data/MC")
+        rax.set_xlabel(var)
+        rax.set_ylim(0.5, 1.5)
+        rax.grid(True, alpha=0.3)
+
+        plt.savefig("mc_data_plots/MC_vs_Data_agreement.png", dpi=300, bbox_inches="tight")
+        plt.close()
+
+        
 
 ### MAIN
 if __name__ == "__main__":
@@ -287,3 +364,4 @@ if __name__ == "__main__":
     plotter.batch(batch_size=250)
     plotter.control_plot()
     plotter.resolution_plot()
+    plotter.Plot_MC_Data_Agrement()
