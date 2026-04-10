@@ -1,16 +1,41 @@
 {
-    "Higgs": [],
-    "Z0": [],
-    "DYto2Mu-2Jets_Bin-0J-MLL-50": [
-        "D:\\Praktyki_zawodowe\\Htt_plotter\\data\\Run3_2024\\mt\\DYto2Mu-2Jets_Bin-0J-MLL-50\\nominal\\0d2f7550-208c-11f0-a9b8-68bce183beef_%2FEvents%3B1_0-197003.parquet"
-    ],
-    "DYto2Tau-2Jets_Bin-0J-MLL-50": [
-        "D:\\Praktyki_zawodowe\\Htt_plotter\\data\\Run3_2024\\mt\\DYto2Tau-2Jets_Bin-0J-MLL-50\\nominal\\0060e1ea-962c-11f0-8f5e-12803c0abeef_%2FEvents%3B1_0-168672.parquet"
-    ],
-    "TTto2L2Nu": [
-        "D:\\Praktyki_zawodowe\\Htt_plotter\\data\\Run3_2024\\mt\\TTto2L2Nu\\nominal\\02b91bd4-2088-11f0-bde3-a1bfe183beef_%2FEvents%3B1_0-172840.parquet"
-    ],
-    "WtoTauNu-2Jets": [
-        "D:\\Praktyki_zawodowe\\Htt_plotter\\data\\Run3_2024\\mt\\WtoTauNu-2Jets\\nominal\\00023016-0def-11f0-81cb-e8803c0abeef_%2FEvents%3B1_0-149802.parquet"
+    "Data": {
+    "kind": "data",
+    "color": "black",
+    "dirs": [
+      "data/output/Muon1/"
     ]
+  },
+  "DYto2Mu-2Jets": {
+    "kind": "mc",
+    "scale": 0.5,
+    "color": "tab:blue",
+    "dirs": [
+      "data/output/test_plotter/Run3_2024/mt/DYto2Mu-2Jets_Bin-0J-MLL-50/nominal"
+    ]
+  },
+  "DYto2Tau-2Jets": {
+    "kind": "mc",
+    "scale": 0.5,
+    "color": "tab:orange",
+    "dirs": [
+      "data/output/test_plotter/Run3_2024/mt/DYto2Tau-2Jets_Bin-0J-MLL-50/nominal"
+    ]
+  },
+  "TTto2L2Nu": {
+    "kind": "mc",
+    "scale": 0.2,
+    "color": "tab:red",
+    "dirs": [
+      "data/output/test_plotter/Run3_2024/mt/TTto2L2Nu/nominal"
+    ]
+  },
+  "WtoTauNu": {
+    "kind": "mc",
+    "scale": 2.0,
+    "color": "tab:green",
+    "dirs": [
+      "data/output/test_plotter/Run3_2024/mt/WtoTauNu-2Jets/nominal"
+    ]
+  }
 }

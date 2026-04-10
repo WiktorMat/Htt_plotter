@@ -1,293 +1,289 @@
-import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+import numpy as np
 import os
+import matplotlib.pyplot as plt
 from pathlib import Path
-from itertools import cycle
-import json
 from selection import *
 from config import process, BASE_PATH
+import json
+
 
 class Plotter:
     def __init__(self, xlim_contrl=None, xlim_resolution=None, bins=20, alpha=1):
+
         self.xlim_ctrl = xlim_contrl or 100
         self.xlim_resol = xlim_resolution or 50
         self.bins = bins
         self.alpha = alpha
-        self.recon = []
-        self.contr = []
         self.project_root = Path(__file__).resolve().parent.parent
+        self.base_path = (self.project_root / BASE_PATH).resolve()
         self.all_data = []
-        self.event_colors = {}
-        self._color_cycle = cycle(EVENT_COLOR_PALETTE)
+        self.sample_colors = {}
 
-    def get_event_color(self, event):
-        if event not in self.event_colors:
-            self.event_colors[event] = next(self._color_cycle)
-        return self.event_colors[event]
+        config_path = self.project_root / "source" / "files.json"
+        with open(config_path, "r", encoding="utf-8") as f:
+            self.sample_config = json.load(f)
 
-    ### Generate JSON automatically from folders in config/process
-    def generate_json_from_selection(self, nominal="nominal"):
-        files_dict = {"Higgs": [], "Z0": []}
-        data_folder = Path(BASE_PATH)
+        self.color_palette = [
+            "tab:blue",
+            "tab:orange",
+            "tab:green",
+            "tab:red",
+            "tab:purple",
+            "tab:brown",
+            "tab:pink",
+            "tab:gray"
+        ]
 
-        for proc in process:
-            if proc not in files_dict:
-                files_dict[proc] = []
 
-            folder = data_folder / proc / nominal
-            if not folder.exists():
-                print(f"Folder doesn't exist: {folder}")
-                continue
+    ### Colors
+    def get_sample_color(self, sample):
+        if sample in self.sample_config:
+            if "color" in self.sample_config[sample]:
+                return self.sample_config[sample]["color"]
 
-            for f in os.listdir(folder):
-                if not f.endswith(".parquet"):
+        idx = list(self.sample_config.keys()).index(sample) \
+            if sample in self.sample_config else 0
+
+        return self.color_palette[idx % len(self.color_palette)]
+
+    ### Selection
+    def apply_selection(self):
+
+        for item in self.all_data:
+            df = item["data"]
+
+            try:
+                item["filtered_data"] = SELECT(df)
+            except Exception as e:
+                print(f"[WARN] Selection failed for {item['name']}: {e}")
+                item["filtered_data"] = df
+
+    ### Load data
+    def load_data(self):
+        self.all_data = []
+
+        for sample_name, cfg in self.sample_config.items():
+
+            kind = cfg.get("kind", "mc")
+            scale = cfg.get("scale", 1.0)
+            dirs = cfg.get("dirs", [])
+
+            color = self.get_sample_color(sample_name)
+
+            total_files = 0
+
+            for d in dirs:
+                path = (self.project_root / d).resolve()
+
+                if not path.exists():
+                    print(f"[WARN] Missing path: {path}")
                     continue
 
-                full_path = str(folder / f)
+                parquet_files = list(Path(path).rglob("*.parquet"))
+                total_files += len(parquet_files)
 
-                if "Higgs" in f:
-                    files_dict["Higgs"].append(full_path)
+                print(f"[LOAD] {sample_name}: {len(parquet_files)} files in {path}")
 
-                elif "Z0" in f or "DYto2" in f or "TT" in f or "Wto" in f:
-                    files_dict["Z0"].append(full_path)
-
-                files_dict[proc].append(full_path)
-
-        project_root = Path(__file__).resolve().parent.parent
-        source_folder = project_root / "source"
-        source_folder.mkdir(exist_ok=True)
-
-        json_path = source_folder / "files.json"
-        with open(json_path, "w") as f:
-            json.dump(files_dict, f, indent=4)
-
-        print(f"JSON created at {json_path}")
-        return json_path
-
-    ### Loading data files from generated JSON
-    def load_data(self, json_path=None):
-        self.all_paths = []
-        self.all_data = []
-
-        if json_path is None:
-            json_path = self.project_root / "source" / "files.json"
-
-        with open(json_path) as f:
-            files_dict = json.load(f)
-
-        for event, file_list in files_dict.items():
-            for file_path_str in file_list:
-                full_path = Path(file_path_str)
-                self.all_paths.append(full_path.name)
-
-                if full_path.exists():
+                for file in parquet_files:
                     try:
-                        ext = full_path.suffix.lower()
-                        if ext == ".csv":
-                            df = pd.read_csv(full_path)
-                        elif ext == ".parquet":
-                            df = pd.read_parquet(full_path)
-                        else:
-                            print(f"Unsupported file type: {full_path.name}")
-                            continue
+                        df = pd.read_parquet(file)
 
                         self.all_data.append({
-                            "name": full_path.name,
+                            "name": file.name,
                             "data": df,
-                            "event": event
+                            "sample": sample_name,
+                            "kind": kind,
+                            "scale": scale,
+                            "color": color
                         })
 
-                        print(f"Loaded: {full_path.name}")
-
                     except Exception as e:
-                        print(f"Error while loading {full_path.name}: {e}")
-                else:
-                    print(f"File {full_path} does not exist")
+                        print(f"[ERROR] {file}: {e}")
 
-    ### Set parameters for control/resolution plotting
-    def set_parameters(self, contr_name=None, recon_name=None):
+        print(f"[INFO] Loaded samples: {set(x['sample'] for x in self.all_data)}")
+
+    ### Set parameters
+    def set_parameters(self):
+        print("[INFO] Setting parameters...")
+
         self.contr_name = []
         self.recon_name = []
 
         for item in self.all_data:
-            df = item["data"]
-            cols = plotting(df)
+            df = item.get("filtered_data", item["data"])
+
+            try:
+                cols = plotting(df)
+            except Exception as e:
+                print(f"[WARN] plotting() failed for {item['name']}: {e}")
+                continue
+
             self.contr_name.extend(cols.get("control", []))
             self.recon_name.extend(cols.get("resolution", []))
 
         self.contr_name = list(dict.fromkeys(self.contr_name))
         self.recon_name = list(dict.fromkeys(self.recon_name))
 
-        if not self.contr_name and not self.recon_name:
-            print("No plotting columns found in any data.")
-
-        all_columns = set(col for item in self.all_data for col in item["data"].columns)
-        if contr_name and contr_name in all_columns:
-            self.contr_name.append(contr_name)
-        if recon_name and recon_name in all_columns:
-            self.recon_name.append(recon_name)
-
-        for i, c in enumerate(self.contr_name):
-            r = self.recon_name[i] if i < len(self.recon_name) else "N/A"
-            print(f"Control file is {c}, and resolution is {r}")
+        print(f"[INFO] Control vars: {len(self.contr_name)}")
+        print(f"[INFO] Resolution vars: {len(self.recon_name)}")
 
     ### Batch processing
     def batch(self, batch_size=250):
-        self.batch_size = batch_size
+        print("[INFO] Creating batches...")
+
         self.batch_dfs = {}
 
-        for contr_name, recon_name in zip(self.contr_name, self.recon_name):
-            key = f"{contr_name}_{recon_name}"
-            self.batch_dfs[key] = []
+        for contr_name in self.contr_name:
+            for recon_name in self.recon_name:
 
-            for item in self.all_data:
-                df = item.get("filtered_data", item["data"])
-                file_name = item["name"]
+                key = f"{contr_name}_{recon_name}"
+                self.batch_dfs[key] = []
 
-                if contr_name not in df.columns or recon_name not in df.columns:
-                    continue
+                for item in self.all_data:
 
-                contr = df[contr_name]
-                recon = df[recon_name]
-                resolution = (recon - contr) / contr
-                resolution = resolution.replace([np.inf, -np.inf], np.nan).dropna()
+                    df = item.get("filtered_data", item["data"])
 
-                batches = [
-                    resolution.iloc[j:j+self.batch_size].reset_index(drop=True)
-                    for j in range(0, len(resolution), self.batch_size)
-                ]
+                    if contr_name not in df.columns or recon_name not in df.columns:
+                        continue
 
-                batch_df = pd.concat(batches, axis=1)
+                    c = df[contr_name]
+                    r = df[recon_name]
 
-                self.batch_dfs[key].append({
-                    "name": file_name,
-                    "data": batch_df,
-                    "event": item.get("event", "unknown")
-                })
+                    mask = c.notna() & r.notna() & (c != 0)
 
-    ### Control plotting
+                    c = c[mask]
+                    r = r[mask]
+
+                    if len(c) == 0:
+                        continue
+
+                    resolution = (r - c) / c
+                    resolution = resolution.replace([np.inf, -np.inf], np.nan).dropna()
+
+                    if len(resolution) == 0:
+                        continue
+
+                    batches = [
+                        resolution.iloc[i:i + batch_size].reset_index(drop=True)
+                        for i in range(0, len(resolution), batch_size)
+                    ]
+
+                    self.batch_dfs[key].append({
+                        "name": item["name"],
+                        "data": pd.concat(batches, axis=1),
+                        "sample": item["sample"]
+                    })
+
+    ### Control plots
     def control_plot(self):
-        if len(self.all_data) == 0:
-            print("No data in all_data")
-            return
-
-        folder_name = "control_plots"
-        os.makedirs(folder_name, exist_ok=True)
-
-        json_path = Path(__file__).resolve().parent.parent / "source" / "files.json"
-        with open(json_path) as f:
-            files_event_map = json.load(f)
-
-        file_to_event = {}
-        for event, file_list in files_event_map.items():
-            for f in file_list:
-                file_to_event[Path(f).name] = event
+        os.makedirs("control_plots", exist_ok=True)
 
         for contr_name in self.contr_name:
+
             plt.figure()
-            bottom_counts = None
+            bottom = None
+
             for item in self.all_data:
+
                 df = item.get("filtered_data", item["data"])
+
                 if contr_name not in df.columns:
                     continue
 
-                file_name = item["name"]
-                event = file_to_event.get(file_name, item.get("event", "unknown"))
-                color = self.get_event_color(event)
+                values = df[contr_name].dropna()
 
-                contr = df[contr_name]
                 counts, bins = np.histogram(
-                    contr,
+                    values,
                     bins=self.bins,
                     range=(-self.xlim_ctrl, self.xlim_ctrl)
                 )
 
-                if bottom_counts is None:
-                    bottom_counts = np.zeros_like(counts)
+                if bottom is None:
+                    bottom = np.zeros_like(counts)
 
                 plt.bar(
                     bins[:-1],
                     counts,
                     width=np.diff(bins),
-                    bottom=bottom_counts,
-                    color=color,
+                    bottom=bottom,
+                    color=item["color"],
                     edgecolor="black",
-                    align="edge",
+                    label=item["sample"],
+                    align="edge"
                 )
 
-                bottom_counts += counts
+                bottom += counts
 
-            plt.title(f"Control {contr_name} histogram")
+            plt.title(f"Control: {contr_name}")
             plt.xlabel(contr_name)
-            plt.ylabel("Amount")
+            plt.ylabel("Events")
+            plt.legend()
             plt.grid(True)
-            plt.legend([f"{event} - {contr_name}" for event in self.event_colors.keys()], loc="upper right")
-            plt.savefig(os.path.join(folder_name, f"{contr_name}.png"))
-            plt.clf()
-            print(f"File saved to {folder_name}/{contr_name}.png")
 
-    ### Resolution plotting
+            plt.savefig(f"control_plots/{contr_name}.png", dpi=300)
+            plt.close()
+
+    ### Resolution plots
     def resolution_plot(self):
-        if not hasattr(self, "batch_dfs") or len(self.batch_dfs) == 0:
-            print("No batch data available")
-            return
+        os.makedirs("resolution_plots", exist_ok=True)
 
-        folder_name = "resolution_plots"
-        os.makedirs(folder_name, exist_ok=True)
+        for key, items in self.batch_dfs.items():
 
-        json_path = Path(__file__).resolve().parent.parent / "source" / "files.json"
-        with open(json_path) as f:
-            files_event_map = json.load(f)
-
-        file_to_event = {}
-        for event, file_list in files_event_map.items():
-            for f in file_list:
-                file_to_event[Path(f).name] = event
-
-        for key in self.batch_dfs:
             plt.figure()
-            bottom_counts = None
+            bottom = None
 
-            for item in self.batch_dfs[key]:
-                batch_df = item["data"]
-                file_name = item["name"]
-                values = batch_df.values.flatten()
-                counts, bins = np.histogram(values, bins=self.bins, range=(-self.xlim_resol, self.xlim_resol))
+            for item in items:
 
-                event = file_to_event.get(file_name, item.get("event", "unknown"))
-                color = self.get_event_color(event)
+                values = item["data"].values.flatten()
+                values = pd.Series(values).dropna()
 
-                if bottom_counts is None:
-                    bottom_counts = np.zeros_like(counts)
+                if len(values) == 0:
+                    continue
+
+                counts, bins = np.histogram(
+                    values,
+                    bins=self.bins,
+                    range=(-self.xlim_resol, self.xlim_resol)
+                )
+
+                if bottom is None:
+                    bottom = np.zeros_like(counts)
 
                 plt.bar(
                     bins[:-1],
                     counts,
                     width=np.diff(bins),
-                    bottom=bottom_counts,
-                    color=color,
+                    bottom=bottom,
+                    color=self.get_sample_color(item["sample"]),
                     edgecolor="black",
-                    align="edge",
+                    label=item["sample"],
+                    align="edge"
                 )
 
-                bottom_counts += counts
+                bottom += counts
 
-            contr_name, recon_name = key.rsplit("_", 1)
-            plt.title(f"Resolution {recon_name} histogram")
-            plt.xlabel(recon_name)
-            plt.ylabel("Amount")
+            contr, recon = key.rsplit("_", 1)
+
+            plt.title(f"Resolution: {recon} vs {contr}")
+            plt.xlabel(recon)
+            plt.ylabel("Events")
+            plt.legend()
             plt.grid(True)
-            plt.legend([f"{event} - {recon_name}" for event in self.event_colors.keys()], loc="upper right")
-            plt.savefig(os.path.join(folder_name, f"Test_{recon_name}_from_{contr_name}.png"))
-            plt.clf()
-            print(f"File saved to {folder_name}/Test_{recon_name}_from_{contr_name}.png")
+
+            plt.savefig(
+                f"resolution_plots/Resolution_{recon}_from_{contr}.png",
+                dpi=300
+            )
+            plt.close()
 
 
-plotter = Plotter(100, 50, 20, 1)
-json_file = plotter.generate_json_from_selection()
-plotter.load_data(json_file)
-plotter.set_parameters()
-plotter.batch(batch_size=250)
-plotter.control_plot()
-plotter.resolution_plot()
+### MAIN
+if __name__ == "__main__":
+    plotter = Plotter(100, 50, 20, 1)
+    plotter.load_data()
+    plotter.apply_selection()
+    plotter.set_parameters()
+    plotter.batch(batch_size=250)
+    plotter.control_plot()
+    plotter.resolution_plot()
