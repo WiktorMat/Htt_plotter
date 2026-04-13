@@ -1,6 +1,6 @@
 import pandas as pd
 import os
-from config import *
+from Config import *
 
 def selection(df):
     conditions = []
