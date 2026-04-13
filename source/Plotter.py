@@ -187,6 +187,8 @@ class Plotter:
 
             plt.figure()
             bottom = None
+            used_labels = set()
+            bottom = None
 
             for item in self.all_data:
 
@@ -212,6 +214,9 @@ class Plotter:
                 if bottom is None:
                     bottom = np.zeros_like(counts)
 
+                label = item["sample"] if item["sample"] not in used_labels else "_nolegend_"
+                used_labels.add(item["sample"])
+
                 plt.bar(
                     bins[:-1],
                     counts,
@@ -219,7 +224,7 @@ class Plotter:
                     bottom=bottom,
                     color=item["color"],
                     edgecolor="black",
-                    label=item["sample"],
+                    label=label,
                     align="edge"
                 )
 
@@ -243,6 +248,7 @@ class Plotter:
         for key, items in self.batch_dfs.items():
 
             plt.figure()
+            used_labels = set()
             bottom = None
 
             for item in items:
@@ -268,6 +274,9 @@ class Plotter:
                 if bottom is None:
                     bottom = np.zeros_like(counts)
 
+                label = item["sample"] if item["sample"] not in used_labels else "_nolegend_"
+                used_labels.add(item["sample"])
+
                 plt.bar(
                     bins[:-1],
                     counts,
@@ -275,7 +284,7 @@ class Plotter:
                     bottom=bottom,
                     color=self.get_sample_color(item["sample"]),
                     edgecolor="black",
-                    label=item["sample"],
+                    label=label,
                     align="edge"
                 )
 
@@ -296,6 +305,7 @@ class Plotter:
 
     def Plot_MC_Data_Agrement(self):
         os.makedirs("plots/mc_data_plots", exist_ok=True)
+        used_labels = set()
 
         var = self.contr_name[0] if hasattr(self, "contr_name") and self.contr_name else "m_vis"
 
