@@ -7,6 +7,7 @@ from selection import *
 from config import process, BASE_PATH
 import json
 import matplotlib.gridspec as gridspec
+from qcd_from_ss import add_qcd_from_ss
 
 
 class Plotter:
@@ -100,7 +101,7 @@ class Plotter:
                         })
 
                     except Exception as e:
-                        print(f"[ERROR] {file}: {e}")
+                        print(f"ERROR {file}: {e}")
 
         print(f"Loaded samples: {set(x['sample'] for x in self.all_data)}")
 
@@ -286,39 +287,101 @@ class Plotter:
         bin_edges = np.linspace(-self.xlim_ctrl, self.xlim_ctrl, self.bins + 1)
         bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
 
-        mc_samples = {}
-        data_counts = None
-        data_var = None
+        histograms = {
+            "OS": {},
+            "SS": {}
+        }
+
+        sample_kinds = {}
 
         for item in self.all_data:
+
             df = item.get("filtered_data", item["data"])
-            if var not in df.columns:
+
+            if var not in df.columns or "os" not in df.columns:
                 continue
 
-            values = df[var].dropna().to_numpy()
-            if len(values) == 0:
-                continue
+            sample = item["sample"]
+            kind = item.get("kind", "mc")
+            scale = item.get("scale", 1.0)
 
-            counts, _ = np.histogram(values, bins=bin_edges)
+            sample_kinds[sample] = kind
 
-            if item.get("kind", "mc") == "data":
-                if data_counts is None:
-                    data_counts = counts.astype(float)
+            values = df[var].to_numpy()
+            os_flag = df["os"].to_numpy()
+
+            weights = np.ones(len(values))
+            if kind != "data":
+                weights *= scale
+
+            regions = {
+                "OS": (os_flag == 1),
+                "SS": (os_flag == 0)
+            }
+
+            for region_name, mask in regions.items():
+
+                if not np.any(mask):
+                    continue
+
+                counts, _ = np.histogram(
+                    values[mask],
+                    bins=bin_edges,
+                    weights=weights[mask]
+                )
+
+                sumw2, _ = np.histogram(
+                    values[mask],
+                    bins=bin_edges,
+                    weights=weights[mask] ** 2
+                )
+
+                if sample not in histograms[region_name]:
+                    histograms[region_name][sample] = {
+                        "counts": counts,
+                        "sumw2": sumw2
+                    }
                 else:
-                    data_counts += counts.astype(float)
+                    histograms[region_name][sample]["counts"] += counts
+                    histograms[region_name][sample]["sumw2"] += sumw2
+
+        config = {
+            "add_qcd_from_ss": True,
+            "qcd_ff": 1.0
+        }
+
+        add_qcd_from_ss(histograms, config, sample_kinds)
+
+        samples = histograms["OS"]
+
+        data_counts = None
+        data_sumw2 = None
+
+        mc_samples = {}
+
+        for name, hist in samples.items():
+
+            counts = hist["counts"]
+
+            if sample_kinds.get(name, "mc") == "data":
+                if data_counts is None:
+                    data_counts = counts.copy()
+                    data_sumw2 = hist["sumw2"].copy()
+                else:
+                    data_counts += counts
+                    data_sumw2 += hist["sumw2"]
+
             else:
-                name = item["sample"]
-                if name not in mc_samples:
-                    mc_samples[name] = np.zeros_like(counts, dtype=float)
-                mc_samples[name] += counts.astype(float) * item.get("scale", 1.0)
+                mc_samples[name] = counts.copy()
 
         if data_counts is None:
-            print("No data found for MC/Data agreement plot")
+            print("No data found")
             return
 
         total_mc = np.zeros_like(data_counts)
-        for v in mc_samples.values():
-            total_mc += v
+
+        for vals in mc_samples.values():
+            total_mc += vals
 
 
         fig = plt.figure(figsize=(7, 6))
@@ -330,17 +393,51 @@ class Plotter:
         bottom = np.zeros_like(total_mc)
 
         for name, vals in mc_samples.items():
-            ax.bar(bin_edges[:-1], vals, width=np.diff(bin_edges), bottom=bottom, align="edge", label=name)
+
+            color = "gray" if name == "QCD" else self.get_sample_color(name)
+
+            label = "QCD (from SS)" if name == "QCD" else name
+
+            ax.bar(
+                bin_edges[:-1],
+                vals,
+                width=np.diff(bin_edges),
+                bottom=bottom,
+                align="edge",
+                label=label,
+                color=color
+            )
+
             bottom += vals
 
-        ax.errorbar(bin_centers, data_counts, yerr=np.sqrt(data_counts), fmt="o", color="black", label="Data")
-        ax.step(bin_edges[:-1], total_mc, where="post", color="black", linewidth=1, label="MC total")
+        ax.errorbar(
+            bin_centers,
+            data_counts,
+            yerr=np.sqrt(data_counts),
+            fmt="o",
+            color="black",
+            label="Data"
+        )
+
+        ax.step(
+            bin_edges[:-1],
+            total_mc,
+            where="post",
+            color="black",
+            linewidth=1,
+            label="MC total"
+        )
 
         ax.set_ylabel("Events")
         ax.legend()
         ax.grid(True, alpha=0.3)
 
-        ratio = np.divide(data_counts, total_mc, out=np.zeros_like(data_counts, dtype=float), where=total_mc != 0)
+        ratio = np.divide(
+            data_counts,
+            total_mc,
+            out=np.zeros_like(data_counts, dtype=float),
+            where=total_mc != 0
+        )
 
         rax.axhline(1.0, linestyle="--", color="black")
         rax.plot(bin_centers, ratio, "o", color="black")
@@ -350,8 +447,13 @@ class Plotter:
         rax.set_ylim(0.5, 1.5)
         rax.grid(True, alpha=0.3)
 
-        plt.savefig("mc_data_plots/MC_vs_Data_agreement.png", dpi=300, bbox_inches="tight")
+        plt.savefig(
+            "mc_data_plots/MC_vs_Data_agreement_QCD.png",
+            dpi=300,
+            bbox_inches="tight"
+        )
         plt.close()
+
 
         
 
