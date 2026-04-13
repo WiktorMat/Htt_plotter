@@ -1,7 +1,6 @@
 import pandas as pd
 import os
 from config import *
-from config2 import *
 
 def selection(df):
     conditions = []
@@ -51,7 +50,6 @@ def plotting(df):
         print("No plotting columns were found in this DataFrame")
 
     return {"control": columns_control, "resolution": columns_resol}
-
 
 def Stack_together(processes, nominal):
     results = {}
