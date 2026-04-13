@@ -191,10 +191,10 @@ class Plotter:
 
         for contr_name in self.contr_name:
 
-            plt.figure()
-            bottom = None
-            used_labels = set()
-            bottom = None
+            plt.figure(figsize=(8, 6))
+
+            sample_hists = {}
+            bins = None
 
             for item in self.all_data:
 
@@ -203,7 +203,10 @@ class Plotter:
                 if contr_name not in df.columns:
                     continue
 
-                values = df[contr_name].dropna()
+                values = df[contr_name].dropna().to_numpy()
+
+                if len(values) == 0:
+                    continue
 
                 weights = np.ones(len(values))
 
@@ -217,20 +220,30 @@ class Plotter:
                     weights=weights
                 )
 
-                if bottom is None:
-                    bottom = np.zeros_like(counts)
+                sample = item["sample"]
 
-                label = item["sample"] if item["sample"] not in used_labels else "_nolegend_"
-                used_labels.add(item["sample"])
+                if sample not in sample_hists:
+                    sample_hists[sample] = counts.astype(float)
+                else:
+                    sample_hists[sample] += counts.astype(float)
+
+            if not sample_hists:
+                print(f"No data for {contr_name}")
+                plt.close()
+                continue
+
+            bottom = np.zeros(self.bins)
+
+            for sample, counts in sample_hists.items():
 
                 plt.bar(
                     bins[:-1],
                     counts,
                     width=np.diff(bins),
                     bottom=bottom,
-                    color=item["color"],
+                    color=self.get_sample_color(sample),
                     edgecolor="black",
-                    label=label,
+                    label=sample,
                     align="edge"
                 )
 
@@ -240,9 +253,10 @@ class Plotter:
             plt.xlabel(contr_name)
             plt.ylabel("Events")
             plt.legend()
+            plt.grid(True, alpha=0.3)
 
             out_path = f"plots/control_plots/{contr_name}.png"
-            plt.savefig(out_path, dpi=300)
+            plt.savefig(out_path, dpi=300, bbox_inches="tight")
             plt.close()
 
             print(f"Control plots saved to: {out_path}")
