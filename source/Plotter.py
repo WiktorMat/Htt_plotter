@@ -32,6 +32,11 @@ class Plotter:
         with open(params_path, "r", encoding="utf-8") as f:
             self.params = yaml.safe_load(f)
 
+        variables_path = self.project_root / "source" / "variables.json"
+
+        with open(variables_path, "r", encoding="utf-8") as f:
+            self.variable_config = json.load(f)
+
         self.color_palette = [
             "tab:blue",
             "tab:orange",
@@ -54,6 +59,23 @@ class Plotter:
             if sample in self.sample_config else 0
 
         return self.color_palette[idx % len(self.color_palette)]
+    
+    def get_binning(self, var):
+
+        cfg = self.variable_config.get(var, None)
+
+        if cfg is None:
+            if str(var).startswith("res_"):
+                return -1, 1, 50
+            return -self.xlim_ctrl, self.xlim_ctrl, self.bins
+
+        x_min = cfg["x_min"]
+        x_max = cfg["x_max"]
+        bin_width = cfg["bin_width"]
+
+        bins = int((x_max - x_min) / bin_width)
+
+        return x_min, x_max, bins
 
     ### Selection
     def apply_selection(self):
@@ -143,7 +165,15 @@ class Plotter:
         self.batch_dfs = {}
 
         for contr_name in self.contr_name:
-            for recon_name in self.recon_name:
+
+            suffix = contr_name.split("_", 1)[-1]
+
+            matching = [
+                r for r in self.recon_name
+                if r.split("_", 1)[-1] == suffix
+            ]
+
+            for recon_name in matching:
 
                 key = f"{contr_name}_{recon_name}"
                 self.batch_dfs[key] = []
@@ -213,10 +243,12 @@ class Plotter:
                 if item.get("kind", "mc") != "data":
                     weights *= item.get("scale", 1.0)
 
+                x_min, x_max, bins_cfg = self.get_binning(contr_name)
+
                 counts, bins = np.histogram(
                     values,
-                    bins=self.bins,
-                    range=(-self.xlim_ctrl, self.xlim_ctrl),
+                    bins=bins_cfg,
+                    range=(x_min, x_max),
                     weights=weights
                 )
 
@@ -232,7 +264,7 @@ class Plotter:
                 plt.close()
                 continue
 
-            bottom = np.zeros(self.bins)
+            bottom = np.zeros(len(bins) - 1)
 
             for sample, counts in sample_hists.items():
 
@@ -284,11 +316,15 @@ class Plotter:
                 if item.get("kind", "mc") != "data":
                     weights *= item.get("scale", 1.0)
 
+                contr, recon = key.rsplit("_", 1)
+                res_var = f"res_{recon}"
+                x_min, x_max, bins_cfg = self.get_binning(res_var)
+
                 counts, bins = np.histogram(
                     values,
-                    bins=self.bins,
-                    range=(-self.xlim_resol, self.xlim_resol),
-                    weights = weights
+                    bins=bins_cfg,
+                    range=(x_min, x_max),
+                    weights=weights
                 )
 
                 if bottom is None:
@@ -403,10 +439,16 @@ class Plotter:
                     if not np.any(mask):
                         continue
 
-                    counts, _ = np.histogram(
-                        values[mask],
-                        bins=bin_edges,
-                        weights=weights[mask]
+                    x_min, x_max, bins_cfg = self.get_binning(var)
+
+                    bin_edges = np.linspace(x_min, x_max, bins_cfg + 1)
+                    bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+
+                    counts, bins = np.histogram(
+                        values,
+                        bins=bins_cfg,
+                        range=(x_min, x_max),
+                        weights=weights
                     )
 
                     sumw2, _ = np.histogram(
