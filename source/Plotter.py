@@ -355,7 +355,24 @@ class Plotter:
 
             sample_kinds = {}
 
+            total_files = len(self.all_data)
+            processed_files = 0
+
             for item in self.all_data:
+
+                processed_files += 1
+
+                if processed_files % 200 == 0 or processed_files == total_files:
+
+                    file_name = item["name"]
+
+                    folder_name = item.get("path", item["sample"])
+
+                    print(
+                        f"INFO Processed {processed_files}/{total_files} files \n"
+                        f"Current folder: {folder_name} \n"
+                        f"Current file: {file_name}"
+                    )
 
                 df = item.get("filtered_data", item["data"])
 
