@@ -1,14 +1,22 @@
+import sys
+from pathlib import Path
+
+project_root = Path(__file__).resolve().parent.parent
+sys.path.append(str(project_root))
+
 import pandas as pd
 import numpy as np
 import os
 import matplotlib.pyplot as plt
-from pathlib import Path
-from Selection import *
-from Config import process, BASE_PATH
+import yaml
+import subprocess
+import sys
 import json
 import matplotlib.gridspec as gridspec
+
 from qcd_from_ss import add_qcd_from_ss
-import yaml
+from Selection import *
+
 
 
 class Plotter:
@@ -23,18 +31,17 @@ class Plotter:
         self.all_data = []
         self.sample_colors = {}
 
-        config_path = self.project_root / "source" / "files.json"
-        with open(config_path, "r", encoding="utf-8") as f:
+        self.project_root = Path(__file__).resolve().parent.parent
+
+        config_dir = self.project_root / "Configurations" / "config_0"
+
+        with open(config_dir / "files.json", "r", encoding="utf-8") as f:
             self.sample_config = json.load(f)
 
-        params_path = self.project_root / "source" / "params.yaml"
-
-        with open(params_path, "r", encoding="utf-8") as f:
+        with open(config_dir / "params.yaml", "r", encoding="utf-8") as f:
             self.params = yaml.safe_load(f)
 
-        variables_path = self.project_root / "source" / "variables.json"
-
-        with open(variables_path, "r", encoding="utf-8") as f:
+        with open(config_dir / "variables.json", "r", encoding="utf-8") as f:
             self.variable_config = json.load(f)
 
         self.color_palette = [
@@ -587,6 +594,11 @@ class Plotter:
 
 ### MAIN
 if __name__ == "__main__":
+    subprocess.run(
+        [sys.executable, "json_generator.py"],
+        cwd=project_root / "source",
+        check=True
+    )
     plotter = Plotter(100, 50, 20, 1)
     plotter.load_data()
     plotter.apply_selection()
