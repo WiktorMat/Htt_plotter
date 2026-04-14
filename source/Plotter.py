@@ -297,13 +297,17 @@ class Plotter:
     def resolution_plot(self):
         os.makedirs("plots/resolution_plots", exist_ok=True)
 
-        for key, items in self.batch_dfs.items():
+        for key in self.batch_dfs.keys():
 
-            plt.figure()
-            used_labels = set()
-            bottom = None
+            contr, recon = key.rsplit("_", 1)
+            res_var = f"res_{recon}"
 
-            for item in items:
+            x_min, x_max, bins_cfg = self.get_binning(res_var)
+            bin_edges = np.linspace(x_min, x_max, bins_cfg + 1)
+
+            sample_hists = {}
+
+            for item in self.batch_dfs[key]:
 
                 values = item["data"].values.flatten()
                 values = pd.Series(values).dropna()
@@ -316,42 +320,47 @@ class Plotter:
                 if item.get("kind", "mc") != "data":
                     weights *= item.get("scale", 1.0)
 
-                contr, recon = key.rsplit("_", 1)
-                res_var = f"res_{recon}"
-                x_min, x_max, bins_cfg = self.get_binning(res_var)
-
-                counts, bins = np.histogram(
+                counts, _ = np.histogram(
                     values,
-                    bins=bins_cfg,
+                    bins=bin_edges,
                     range=(x_min, x_max),
                     weights=weights
                 )
 
-                if bottom is None:
-                    bottom = np.zeros_like(counts)
+                sample = item["sample"]
 
-                label = item["sample"] if item["sample"] not in used_labels else "_nolegend_"
-                used_labels.add(item["sample"])
+                if sample not in sample_hists:
+                    sample_hists[sample] = counts.astype(float)
+                else:
+                    sample_hists[sample] += counts.astype(float)
+
+            if not sample_hists:
+                print(f"No data for {key}")
+                continue
+
+            plt.figure()
+            bottom = np.zeros(len(bin_edges) - 1)
+
+            for sample, counts in sample_hists.items():
 
                 plt.bar(
-                    bins[:-1],
+                    bin_edges[:-1],
                     counts,
-                    width=np.diff(bins),
+                    width=np.diff(bin_edges),
                     bottom=bottom,
-                    color=self.get_sample_color(item["sample"]),
+                    color=self.get_sample_color(sample),
                     edgecolor="black",
-                    label=label,
+                    label=sample,
                     align="edge"
                 )
 
                 bottom += counts
 
-            contr, recon = key.rsplit("_", 1)
-
             plt.title(f"Resolution: {recon} vs {contr}")
-            plt.xlabel(recon)
+            plt.xlabel(res_var)
             plt.ylabel("Events")
             plt.legend()
+            plt.grid(True, alpha=0.3)
 
             out_path = f"plots/resolution_plots/Resolution_{recon}_from_{contr}.png"
             plt.savefig(out_path, dpi=300)
