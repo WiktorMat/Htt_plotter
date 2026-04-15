@@ -3,6 +3,13 @@ import os
 
 from Configurations.config_0.Config import *
 
+SELECTION_COLUMNS = [
+    "os",
+    "pt_1",
+    "pt_2",
+    "eta_1",
+    "eta_2"
+]
 
 def selection(df):
     conditions = []
@@ -41,7 +48,7 @@ def SELECT(df_or_path):
     if isinstance(df_or_path, str):
         df = pd.read_parquet(df_or_path)
     else:
-        df = df_or_path.copy()
+        df = df_or_path
     return df[selection(df)]
 
 def plotting(df):

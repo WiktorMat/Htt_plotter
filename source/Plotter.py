@@ -31,8 +31,9 @@ class Plotter:
         self.base_path = (self.project_root / BASE_PATH).resolve()
         self.sample_colors = {}
         self.files_index = []
-        self.files_index = []
         self.log_every_files = 200
+        self._bin_cache = {}
+        self._mc_weight_cache = {}
 
         self.project_root = Path(__file__).resolve().parent.parent
 
@@ -73,21 +74,26 @@ class Plotter:
         return cfg.get("color", "tab:blue")
     
     def get_binning(self, var):
+        if var in self._bin_cache:
+            return self._bin_cache[var]
 
         cfg = self.variable_config.get(var)
 
         if cfg is None:
             if str(var).startswith("res_"):
-                return -1, 1, 50
-            return -self.xlim_ctrl, self.xlim_ctrl, self.bins
+                res = (-1, 1, 50)
+            else:
+                res = (-self.xlim_ctrl, self.xlim_ctrl, self.bins)
+        else:
+            x_min = cfg["x_min"]
+            x_max = cfg["x_max"]
+            bin_width = cfg["bin_width"]
+            bins = int((x_max - x_min) / bin_width)
+            edges = np.linspace(x_min, x_max, bins + 1)
+            res = (x_min, x_max, bins, edges)
 
-        x_min = cfg["x_min"]
-        x_max = cfg["x_max"]
-        bin_width = cfg["bin_width"]
-
-        bins = int((x_max - x_min) / bin_width)
-
-        return x_min, x_max, bins
+        self._bin_cache[var] = res
+        return res
 
     ### Selection
     def apply_selection(self):
@@ -168,16 +174,22 @@ class Plotter:
                 vals = df[var].dropna().to_numpy()
                 if len(vals) == 0:
                     continue
-                x_min,x_max,nb = bins_map[var]
-                counts,_ = np.histogram(vals, bins=nb, range=(x_min,x_max), weights=np.ones(len(vals))*scale)
+                x_min, x_max, nb, edges = bins_map[var]
+                counts,_ = np.histogram(vals, bins=nb, range=(x_min,x_max))
+                counts = counts * scale
                 hists[var].setdefault(sample, np.zeros(nb))
                 hists[var][sample] += counts
 
         for var in vars_all:
             if not hists[var]:
                 continue
-            x_min,x_max,nb = bins_map[var]
-            edges = np.linspace(x_min,x_max,nb+1)
+            x_min, x_max, nb, edges = bins_map[var]
+
+            if var in self._bin_cache:
+                x_min, x_max, nb, edges = self._bin_cache[var]
+            else:
+                edges = np.linspace(x_min, x_max, nb + 1)
+                self._bin_cache[var] = (x_min, x_max, nb, edges)
             bottom = np.zeros(nb)
             plt.figure(figsize=(8,6))
             for sample,counts in hists[var].items():
@@ -207,7 +219,15 @@ class Plotter:
             res_var = f"res_{r}"
             x_min,x_max,nb = self.get_binning(res_var)
             pair_hists[(c,r)] = {}
-            pair_bins[(c,r)] = np.linspace(x_min,x_max,nb+1)
+            key = (c, r)
+
+            if key in self._bin_cache:
+                edges = self._bin_cache[key][3]
+            else:
+                edges = np.linspace(x_min, x_max, nb + 1)
+                self._bin_cache[key] = (x_min, x_max, nb, edges)
+
+            pair_bins[key] = edges
 
         for item in self.files_index:
             available = [(c,r) for c,r in self.resolution_pairs if c in item.get("schema",set()) and r in item.get("schema",set())]
@@ -225,7 +245,8 @@ class Plotter:
                     continue
                 res = (rv[mask]-cv[mask])/cv[mask]
                 edges = pair_bins[(c,r)]
-                counts,_ = np.histogram(res, bins=edges, weights=np.ones(len(res))*scale)
+                counts,_ = np.histogram(res, bins=edges)
+                counts *= scale
                 pair_hists[(c,r)].setdefault(sample, np.zeros(len(edges)-1))
                 pair_hists[(c,r)][sample] += counts
 
@@ -248,6 +269,10 @@ class Plotter:
         print(f"Resolution plots saved to: resolution_plots")
 
     def compute_mc_weight(self, sample_name):
+
+        if sample_name in self._mc_weight_cache:
+            return self._mc_weight_cache[sample_name]
+
         p = self.params.get(sample_name, None)
 
         if p is None:
@@ -261,18 +286,25 @@ class Plotter:
         if eff == 0:
             return 0.0
 
-        return (xs * lumi) / eff
+        w = (xs * lumi) / eff
+        self._mc_weight_cache[sample_name] = w
+
+        return w
 
     def Plot_MC_Data_Agrement(self):
         os.makedirs("plots/mc_data_plots", exist_ok=True)
 
         for var in self.contr_name:
 
-            x_min, x_max, bins_cfg = self.get_binning(var)
-            bin_edges = np.linspace(x_min, x_max, bins_cfg + 1)
+            x_min, x_max, bins_cfg, bin_edges = self.get_binning(var)
+            key = ("mc_data", var)
+
+            if key in self._bin_cache:
+                bin_edges = self._bin_cache[key][3]
+            else:
+                self._bin_cache[key] = (x_min, x_max, bins_cfg, bin_edges)
             bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
 
-            # --- storage ---
             histograms = {
                 "OS": {},
                 "SS": {}
@@ -290,7 +322,7 @@ class Plotter:
 
                 df = self.data_access.load_parquet(
                     item["path"],
-                    columns=self.get_needed_columns(),
+                    columns=SELECTION_COLUMNS,
                     selector=SELECT
                 )
 
@@ -312,8 +344,10 @@ class Plotter:
                 values = df[var].to_numpy()
                 os_flag = df["os"].to_numpy()
 
-                weight = self.compute_mc_weight(sample) if kind != "data" else 1.0
-                weights = np.ones(len(values)) * weight
+                if kind == "data":
+                    weight = 1.0
+                else:
+                    weight = self.compute_mc_weight(sample)
 
                 regions = {
                     "OS": os_flag == 1,
@@ -326,17 +360,9 @@ class Plotter:
                     if not np.any(mask):
                         continue
 
-                    counts, _ = np.histogram(
-                        values[mask],
-                        bins=bin_edges,
-                        weights=np.ones(mask.sum()) * weight
-                    )
-
-                    sumw2, _ = np.histogram(
-                        values[mask],
-                        bins=bin_edges,
-                        weights=np.ones(mask.sum()) * (weight ** 2)
-                    )
+                    counts, _ = np.histogram(values[mask], bins=bin_edges)
+                    counts = counts * weight
+                    sumw2 = counts * (weight ** 2)
 
                     if sample not in histograms[region_name]:
                         histograms[region_name][sample] = {
