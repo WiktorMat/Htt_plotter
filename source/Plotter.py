@@ -29,7 +29,7 @@ logging.basicConfig(
 
 
 class Plotter:
-    def __init__(self, xlim_contrl=None, xlim_resolution=None, bins=20, alpha=1):
+    def __init__(self, xlim_contrl=None, xlim_resolution=None, bins=20, alpha=1, config_name="config_0"):
         self.xlim_ctrl = xlim_contrl or 100
         self.xlim_resol = xlim_resolution or 50
         self.bins = bins
@@ -49,7 +49,12 @@ class Plotter:
         self.resolution_pairs = []
 
         from config_loader import load_configs
-        self.sample_config, self.params, self.variable_config = load_configs(self.project_root)
+
+        self.config_name = config_name
+        self.sample_config, self.params, self.variable_config = load_configs(
+            self.project_root,
+            self.config_name
+        )
 
         self.data_access = DataAccess(
             self.project_root,
@@ -242,7 +247,10 @@ class Plotter:
                 f"plots/control_plots/{var}.png"
             )
 
-        logging.info("Control plots saved")
+        file_path = f"plots/control_plots"
+
+        logging.info(f"Control plots saved to {file_path}")
+
 
     ### Resolution plots
     def resolution_plot(self):
@@ -307,7 +315,9 @@ class Plotter:
                 f"plots/resolution_plots/Resolution_{r}_from_{c}.png"
             )
 
-        logging.info("Resolution plots saved")
+        file_path = "plots/resolution_plots"
+
+        logging.info(f"Resolution plots saved to {file_path}")
 
 
     def compute_mc_weight(self, sample_name):

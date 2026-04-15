@@ -6,8 +6,9 @@ from Plotter import Plotter
 
 project_root = Path(__file__).resolve().parent.parent
 
-#Main
 if __name__ == "__main__":
+
+    config_name = "config_0"
 
     subprocess.run(
         [sys.executable, "json_generator.py"],
@@ -15,7 +16,14 @@ if __name__ == "__main__":
         check=True
     )
 
-    plotter = Plotter(100, 50, 20, 1)
+    plotter = Plotter(
+        100,
+        50,
+        20,
+        1,
+        config_name=config_name
+    )
+
     plotter.load_index()
     plotter.apply_selection()
     plotter.set_parameters()
