@@ -1,53 +1,46 @@
 import sys
+import os
+import json
+import yaml
+import logging
+import subprocess
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 
 project_root = Path(__file__).resolve().parent.parent
 sys.path.append(str(project_root))
-
-import pandas as pd
-import numpy as np
-import os
-import matplotlib.pyplot as plt
-import yaml
-import subprocess
-import sys
-import json
-import matplotlib.gridspec as gridspec
-import logging
 
 from qcd_from_ss import add_qcd_from_ss
 from Selection import *
 from data_access import *
 
 
-
 class Plotter:
     def __init__(self, xlim_contrl=None, xlim_resolution=None, bins=20, alpha=1):
-
         self.xlim_ctrl = xlim_contrl or 100
         self.xlim_resol = xlim_resolution or 50
         self.bins = bins
         self.alpha = alpha
+
         self.project_root = Path(__file__).resolve().parent.parent
         self.base_path = (self.project_root / BASE_PATH).resolve()
-        self.sample_colors = {}
+
         self.files_index = []
         self.log_every_files = 200
+
         self._bin_cache = {}
         self._mc_weight_cache = {}
 
-        self.project_root = Path(__file__).resolve().parent.parent
+        self.contr_name = []
+        self.recon_name = []
+        self.resolution_pairs = []
 
-        config_dir = self.project_root / "Configurations" / "config_0"
-
-        with open(config_dir / "files.json", "r", encoding="utf-8") as f:
-            self.sample_config = json.load(f)
-
-        with open(config_dir / "params.yaml", "r", encoding="utf-8") as f:
-            self.params = yaml.safe_load(f)
-
-        with open(config_dir / "variables.json", "r", encoding="utf-8") as f:
-            self.variable_config = json.load(f)
+        from config_loader import load_configs
+        self.sample_config, self.params, self.variable_config = load_configs(self.project_root)
 
         self.data_access = DataAccess(
             self.project_root,
@@ -55,25 +48,33 @@ class Plotter:
             self.log_every_files
         )
 
-        self.color_palette = [
-            "tab:blue",
-            "tab:orange",
-            "tab:green",
-            "tab:red",
-            "tab:purple",
-            "tab:brown",
-            "tab:pink",
-            "tab:gray"
-        ]
-
-        self.data_access = DataAccess(self.project_root, self.sample_config)
-
-
     ### Colors
     def get_sample_color(self, sample):
         cfg = self.sample_config.get(sample, {})
         return cfg.get("color", "tab:blue")
-    
+
+
+    def ensure_dir(self, path):
+        os.makedirs(path, exist_ok=True)
+
+    def load_index(self):
+        self.files_index = self.data_access.build_index()
+        logging.info(f"Indexed files: {len(self.files_index)}")
+
+    def load_dataframe(self, item, columns):
+        return self.data_access.load_parquet(
+            item["path"],
+            columns=columns,
+            selector=SELECT
+        )
+
+    def get_scale(self, item):
+        return item.get("scale", 1.0) if item.get("kind", "mc") != "data" else 1.0
+
+    def unique_list(self, values):
+        return list(dict.fromkeys(values))
+
+
     def get_binning(self, var):
         if var in self._bin_cache:
             return self._bin_cache[var]
@@ -82,34 +83,34 @@ class Plotter:
 
         if cfg is None:
             if str(var).startswith("res_"):
-                res = (-1, 1, 50)
+                x_min, x_max, nb = -1, 1, 50
             else:
-                res = (-self.xlim_ctrl, self.xlim_ctrl, self.bins)
+                x_min, x_max, nb = -self.xlim_ctrl, self.xlim_ctrl, self.bins
         else:
             x_min = cfg["x_min"]
             x_max = cfg["x_max"]
             bin_width = cfg["bin_width"]
-            bins = int((x_max - x_min) / bin_width)
-            edges = np.linspace(x_min, x_max, bins + 1)
-            res = (x_min, x_max, bins, edges)
+            nb = int((x_max - x_min) / bin_width)
 
-        self._bin_cache[var] = res
-        return res
+        edges = np.linspace(x_min, x_max, nb + 1)
+        result = (x_min, x_max, nb, edges)
 
-    ### Selection
+        self._bin_cache[var] = result
+        return result
+
+
     def apply_selection(self):
-        print("Selection is lazy: applied only while reading")
+        logging.debug("Selection is lazy: applied only while reading")
 
-    def selected_plots():
+    def selected_plots(self):
         return {
             "control": ["pt_tau", "eta_tau"],
             "resolution": ["res_pt_tau"]
         }
-    
+
     def _has_columns(self, item, needed):
         schema = item.get("schema", set())
         return set(needed).issubset(schema)
-
 
     ### Set parameters
     def set_parameters(self):
@@ -121,222 +122,228 @@ class Plotter:
         for item in self.files_index:
             try:
                 cols = list(item["schema"])
-                df = self.data_access.load_parquet(item["path"], columns=cols, selector=SELECT)
+                df = self.load_dataframe(item, cols)
                 cfg = plotting(df)
+
                 self.contr_name.extend(cfg.get("control", []))
                 self.recon_name.extend(cfg.get("resolution", []))
+
             except Exception as e:
-                logging.info(f"plotting failed for {item['path']}: {e}")
+                logging.warning(f"plotting failed for {item['path']}: {e}")
 
-        self.contr_name = list(dict.fromkeys(self.contr_name))
-        self.recon_name = list(dict.fromkeys(self.recon_name))
+        self.contr_name = self.unique_list(self.contr_name)
+        self.recon_name = self.unique_list(self.recon_name)
 
-        logging.info("Control vars:", self.contr_name)
-        logging.info("Resolution vars:", self.recon_name)
+        logging.info(f"Control vars: {self.contr_name}")
+        logging.info(f"Resolution vars: {self.recon_name}")
 
     ### Batch processing
     def batch(self, batch_size=250):
         self.resolution_pairs = []
-        for contr_name in self.contr_name:
-            suffix = contr_name.split("_",1)[-1]
-            for recon_name in self.recon_name:
-                if recon_name.split("_",1)[-1] == suffix:
-                    self.resolution_pairs.append((contr_name, recon_name))
-    
 
-    def get_needed_columns(self):
-        return list(set(
-            self.contr_name +
-            self.recon_name +
-            ["os"]
-        ))
-    
-    def load_index(self):
-        self.files_index = self.data_access.build_index()
-        logging.info(f"Indexed files: {len(self.files_index)}")
-    
+        for control_var in self.contr_name:
+            suffix = control_var.split("_", 1)[-1]
+
+            for reco_var in self.recon_name:
+                if reco_var.split("_", 1)[-1] == suffix:
+                    self.resolution_pairs.append((control_var, reco_var))
+
+
+    def add_histogram(self, container, sample, counts):
+        if sample not in container:
+            container[sample] = np.zeros_like(counts, dtype=float)
+
+        container[sample] += counts
+
+
+    def save_stacked_plot(self, hist_dict, edges, title, xlabel, out_path):
+        bottom = np.zeros(len(edges) - 1)
+
+        plt.figure(figsize=(8, 6))
+
+        for sample, counts in hist_dict.items():
+            plt.bar(
+                edges[:-1],
+                counts,
+                width=np.diff(edges),
+                bottom=bottom,
+                align="edge",
+                label=sample,
+                color=self.get_sample_color(sample),
+                edgecolor="black"
+            )
+            bottom += counts
+
+        plt.title(title)
+        plt.xlabel(xlabel)
+        plt.ylabel("Events")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.savefig(out_path, dpi=300, bbox_inches="tight")
+        plt.close()
 
     ### Control plots
     def control_plot(self):
-        os.makedirs("plots/control_plots", exist_ok=True)
+        logging.info("Starting control plots")
+
+        self.ensure_dir("plots/control_plots")
+
         vars_all = self.contr_name
-        hists = {v:{} for v in vars_all}
-        bins_map = {v:self.get_binning(v) for v in vars_all}
+        hists = {var: {} for var in vars_all}
+        bins_map = {var: self.get_binning(var) for var in vars_all}
 
         for item in self.files_index:
             available = [v for v in vars_all if v in item.get("schema", set())]
+
             if not available:
                 continue
-            df = self.data_access.load_parquet(item["path"], columns=available+["os"], selector=SELECT)
+
+            df = self.load_dataframe(item, available + ["os"])
             sample = item["sample"]
-            scale = item.get("scale",1.0) if item.get("kind","mc") != "data" else 1.0
+            scale = self.get_scale(item)
 
             for var in available:
-                vals = df[var].dropna().to_numpy()
-                if len(vals) == 0:
+                values = df[var].dropna().to_numpy()
+
+                if len(values) == 0:
                     continue
+
                 x_min, x_max, nb, edges = bins_map[var]
-                counts,_ = np.histogram(vals, bins=nb, range=(x_min,x_max))
+
+                counts, _ = np.histogram(
+                    values,
+                    bins=nb,
+                    range=(x_min, x_max)
+                )
+
                 counts = counts * scale
-                hists[var].setdefault(sample, np.zeros(nb))
-                hists[var][sample] += counts
+                self.add_histogram(hists[var], sample, counts)
 
         for var in vars_all:
             if not hists[var]:
                 continue
-            x_min, x_max, nb, edges = bins_map[var]
 
-            if var in self._bin_cache:
-                x_min, x_max, nb, edges = self._bin_cache[var]
-            else:
-                edges = np.linspace(x_min, x_max, nb + 1)
-                self._bin_cache[var] = (x_min, x_max, nb, edges)
-            bottom = np.zeros(nb)
-            plt.figure(figsize=(8,6))
-            for sample,counts in hists[var].items():
-                plt.bar(edges[:-1], counts, width=np.diff(edges), bottom=bottom, align='edge', label=sample, color=self.get_sample_color(sample), edgecolor='black')
-                bottom += counts
-            plt.title(f"Control: {var}")
-            plt.xlabel(var)
-            plt.ylabel("Events")
-            plt.legend(); plt.grid(True, alpha=0.3)
-            plt.savefig(f"plots/control_plots/{var}.png", dpi=300, bbox_inches='tight')
-            plt.close()
+            _, _, _, edges = bins_map[var]
 
-        logging.info(f"Control plots saved to: control plots")
+            self.save_stacked_plot(
+                hists[var],
+                edges,
+                f"Control: {var}",
+                var,
+                f"plots/control_plots/{var}.png"
+            )
+
+        logging.info("Control plots saved")
 
     ### Resolution plots
     def resolution_plot(self):
-        os.makedirs("plots/resolution_plots", exist_ok=True)
+        logging.info("Starting resolution plots")
 
-        if not hasattr(self, "resolution_pairs"):
+        self.ensure_dir("plots/resolution_plots")
+
+        if not self.resolution_pairs:
             self.batch()
-
 
         pair_hists = {}
         pair_bins = {}
 
-        for c,r in self.resolution_pairs:
-            res_var = f"res_{r}"
-            x_min,x_max,nb = self.get_binning(res_var)
-            pair_hists[(c,r)] = {}
-            key = (c, r)
-
-            if key in self._bin_cache:
-                edges = self._bin_cache[key][3]
-            else:
-                edges = np.linspace(x_min, x_max, nb + 1)
-                self._bin_cache[key] = (x_min, x_max, nb, edges)
-
-            pair_bins[key] = edges
+        for c, r in self.resolution_pairs:
+            _, _, nb, edges = self.get_binning(f"res_{r}")
+            pair_hists[(c, r)] = {}
+            pair_bins[(c, r)] = edges
 
         for item in self.files_index:
-            available = [(c,r) for c,r in self.resolution_pairs if c in item.get("schema",set()) and r in item.get("schema",set())]
+            available = [
+                (c, r)
+                for c, r in self.resolution_pairs
+                if c in item.get("schema", set())
+                and r in item.get("schema", set())
+            ]
+
             if not available:
                 continue
-            cols = sorted(set([x for p in available for x in p] + ["os"]))
-            df = self.data_access.load_parquet(item["path"], columns=cols, selector=SELECT)
-            sample = item["sample"]
-            scale = item.get("scale",1.0) if item.get("kind","mc") != "data" else 1.0
 
-            for c,r in available:
-                cv = df[c].to_numpy(); rv = df[r].to_numpy()
+            cols = sorted(set([x for pair in available for x in pair] + ["os"]))
+            df = self.load_dataframe(item, cols)
+
+            sample = item["sample"]
+            scale = self.get_scale(item)
+
+            for c, r in available:
+                cv = df[c].to_numpy()
+                rv = df[r].to_numpy()
+
                 mask = np.isfinite(cv) & np.isfinite(rv) & (cv != 0)
+
                 if not np.any(mask):
                     continue
-                res = (rv[mask]-cv[mask])/cv[mask]
-                edges = pair_bins[(c,r)]
-                counts,_ = np.histogram(res, bins=edges)
-                counts *= scale
-                pair_hists[(c,r)].setdefault(sample, np.zeros(len(edges)-1))
-                pair_hists[(c,r)][sample] += counts
 
-        for (c,r),samples in pair_hists.items():
-            if not samples:
+                resolution = (rv[mask] - cv[mask]) / cv[mask]
+                edges = pair_bins[(c, r)]
+
+                counts, _ = np.histogram(resolution, bins=edges)
+                counts = counts * scale
+
+                self.add_histogram(pair_hists[(c, r)], sample, counts)
+
+        for (c, r), hist in pair_hists.items():
+            if not hist:
                 continue
-            edges = pair_bins[(c,r)]
-            bottom = np.zeros(len(edges)-1)
-            plt.figure(figsize=(8,6))
-            for sample,counts in samples.items():
-                plt.bar(edges[:-1], counts, width=np.diff(edges), bottom=bottom, align='edge', label=sample, color=self.get_sample_color(sample), edgecolor='black')
-                bottom += counts
-            plt.title(f"Resolution: {r} vs {c}")
-            plt.xlabel(f"res_{r}")
-            plt.ylabel("Events")
-            plt.legend(); plt.grid(True, alpha=0.3)
-            plt.savefig(f"plots/resolution_plots/Resolution_{r}_from_{c}.png", dpi=300, bbox_inches='tight')
-            plt.close()
 
-        logging.info(f"Resolution plots saved to: resolution_plots")
+            self.save_stacked_plot(
+                hist,
+                pair_bins[(c, r)],
+                f"Resolution: {r} vs {c}",
+                f"res_{r}",
+                f"plots/resolution_plots/Resolution_{r}_from_{c}.png"
+            )
+
+        logging.info("Resolution plots saved")
+
 
     def compute_mc_weight(self, sample_name):
-
         if sample_name in self._mc_weight_cache:
             return self._mc_weight_cache[sample_name]
 
-        p = self.params.get(sample_name, None)
+        params = self.params.get(sample_name)
 
-        if p is None:
-            print(f"WARN No params for sample: {sample_name}")
+        if params is None:
+            logging.warning(f"No params for sample: {sample_name}")
             return 1.0
 
-        xs = p.get("xs", 1.0)
-        eff = p.get("eff", 1.0)
+        xs = params.get("xs", 1.0)
+        eff = params.get("eff", 1.0)
         lumi = self.params.get("lumi", 1.0)
 
         if eff == 0:
             return 0.0
 
-        w = (xs * lumi) / eff
-        self._mc_weight_cache[sample_name] = w
+        weight = (xs * lumi) / eff
+        self._mc_weight_cache[sample_name] = weight
 
-        return w
+        return weight
 
+    ### MC Data agreement
     def Plot_MC_Data_Agrement(self):
-        os.makedirs("plots/mc_data_plots", exist_ok=True)
+        logging.info("Starting MC/Data plots")
+
+        self.ensure_dir("plots/mc_data_plots")
 
         for var in self.contr_name:
-
-            x_min, x_max, bins_cfg, bin_edges = self.get_binning(var)
-            key = ("mc_data", var)
-
-            if key in self._bin_cache:
-                bin_edges = self._bin_cache[key][3]
-            else:
-                self._bin_cache[key] = (x_min, x_max, bins_cfg, bin_edges)
+            _, _, _, bin_edges = self.get_binning(var)
             bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
 
-            histograms = {
-                "OS": {},
-                "SS": {}
-            }
-
+            histograms = {"OS": {}, "SS": {}}
             sample_kinds = {}
 
-            total_files = len(self.files_index)
-            processed_files = 0
-
             for item in self.files_index:
-
-                if var not in item.get("schema", set()) or "os" not in item.get("schema", set()):
+                if not self._has_columns(item, [var, "os"]):
                     continue
 
-                df = self.data_access.load_parquet(
-                    item["path"],
-                    columns=SELECTION_COLUMNS,
-                    selector=SELECT
-                )
+                df = self.load_dataframe(item, SELECTION_COLUMNS)
 
                 if var not in df.columns or "os" not in df.columns:
                     continue
-
-                processed_files += 1
-
-                if processed_files % 200 == 0 or processed_files == total_files:
-                    print(
-                        f"INFO Processed {processed_files}/{total_files} files\n"
-                        f"File: {Path(item['path']).name}"
-                    )
 
                 sample = item["sample"]
                 kind = item.get("kind", "mc")
@@ -345,19 +352,15 @@ class Plotter:
                 values = df[var].to_numpy()
                 os_flag = df["os"].to_numpy()
 
-                if kind == "data":
-                    weight = 1.0
-                else:
-                    weight = self.compute_mc_weight(sample)
+                weight = 1.0 if kind == "data" else self.compute_mc_weight(sample)
 
-                regions = {
+                for region_name, region_mask in {
                     "OS": os_flag == 1,
                     "SS": os_flag == 0
-                }
-
-                for region_name, region_mask in regions.items():
+                }.items():
 
                     mask = region_mask & np.isfinite(values)
+
                     if not np.any(mask):
                         continue
 
@@ -374,33 +377,28 @@ class Plotter:
                     histograms[region_name][sample]["counts"] += counts
                     histograms[region_name][sample]["sumw2"] += sumw2
 
-            config = {
-                "add_qcd_from_ss": True,
-                "qcd_ff": 1.0
-            }
-
-            add_qcd_from_ss(histograms, config, sample_kinds)
+            add_qcd_from_ss(
+                histograms,
+                {"add_qcd_from_ss": True, "qcd_ff": 1.0},
+                sample_kinds
+            )
 
             samples = histograms["OS"]
 
             data_counts = None
-            data_sumw2 = None
             mc_samples = {}
 
             for name, hist in samples.items():
-
                 if sample_kinds.get(name, "mc") == "data":
                     if data_counts is None:
                         data_counts = hist["counts"].copy()
-                        data_sumw2 = hist["sumw2"].copy()
                     else:
                         data_counts += hist["counts"]
-                        data_sumw2 += hist["sumw2"]
                 else:
                     mc_samples[name] = hist["counts"].copy()
 
             if data_counts is None:
-                print("No data found")
+                logging.warning(f"No data for {var}")
                 continue
 
             total_mc = np.zeros_like(data_counts)
@@ -409,7 +407,6 @@ class Plotter:
                 total_mc += vals
 
             if np.all(total_mc == 0):
-                print(f"Skip {var}: empty MC")
                 continue
 
             fig = plt.figure(figsize=(7, 6))
@@ -421,7 +418,6 @@ class Plotter:
             bottom = np.zeros_like(total_mc)
 
             for name, vals in mc_samples.items():
-
                 color = "gray" if name == "QCD" else self.get_sample_color(name)
                 label = "QCD (from SS)" if name == "QCD" else name
 
@@ -431,8 +427,8 @@ class Plotter:
                     width=np.diff(bin_edges),
                     bottom=bottom,
                     align="edge",
-                    label=label,
-                    color=color
+                    color=color,
+                    label=label
                 )
 
                 bottom += vals
@@ -467,7 +463,6 @@ class Plotter:
 
             rax.axhline(1.0, linestyle="--", color="black")
             rax.plot(bin_centers, ratio, "o", color="black")
-
             rax.set_ylabel("Data/MC")
             rax.set_xlabel(var)
             rax.set_ylim(0.5, 1.5)
@@ -477,24 +472,11 @@ class Plotter:
             plt.savefig(out_path, dpi=300, bbox_inches="tight")
             plt.close()
 
-            logging.info(f"MC to Data plots saved to: {out_path}")
+            logging.info(f"Saved: {out_path}")
 
-### MAIN
+
+###  MAIN
 if __name__ == "__main__":
-    subprocess.run(
-        [sys.executable, "json_generator.py"],
-        cwd=project_root / "source",
-        check=True
-    )
-    plotter = Plotter(100, 50, 20, 1)
-    plotter.load_index()
-    plotter.apply_selection()
-    plotter.set_parameters()
-    plotter.control_plot()
-    plotter.batch()
-    plotter.resolution_plot()
-    plotter.Plot_MC_Data_Agrement()
-
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -503,3 +485,18 @@ if __name__ == "__main__":
                 logging.FileHandler("plotter.log")
             ]
     )
+
+    subprocess.run(
+        [sys.executable, "json_generator.py"],
+        cwd=project_root / "source",
+        check=True
+    )
+
+    plotter = Plotter(100, 50, 20, 1)
+    plotter.load_index()
+    plotter.apply_selection()
+    plotter.set_parameters()
+    plotter.control_plot()
+    plotter.batch()
+    plotter.resolution_plot()
+    plotter.Plot_MC_Data_Agrement()
