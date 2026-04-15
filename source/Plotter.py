@@ -16,6 +16,7 @@ import matplotlib.gridspec as gridspec
 
 from qcd_from_ss import add_qcd_from_ss
 from Selection import *
+from data_access import *
 
 
 
@@ -28,8 +29,10 @@ class Plotter:
         self.alpha = alpha
         self.project_root = Path(__file__).resolve().parent.parent
         self.base_path = (self.project_root / BASE_PATH).resolve()
-        self.all_data = []
         self.sample_colors = {}
+        self.files_index = []
+        self.files_index = []
+        self.log_every_files = 200
 
         self.project_root = Path(__file__).resolve().parent.parent
 
@@ -44,6 +47,12 @@ class Plotter:
         with open(config_dir / "variables.json", "r", encoding="utf-8") as f:
             self.variable_config = json.load(f)
 
+        self.data_access = DataAccess(
+            self.project_root,
+            self.sample_config,
+            self.log_every_files
+        )
+
         self.color_palette = [
             "tab:blue",
             "tab:orange",
@@ -55,21 +64,17 @@ class Plotter:
             "tab:gray"
         ]
 
+        self.data_access = DataAccess(self.project_root, self.sample_config)
+
 
     ### Colors
     def get_sample_color(self, sample):
-        if sample in self.sample_config:
-            if "color" in self.sample_config[sample]:
-                return self.sample_config[sample]["color"]
-
-        idx = list(self.sample_config.keys()).index(sample) \
-            if sample in self.sample_config else 0
-
-        return self.color_palette[idx % len(self.color_palette)]
+        cfg = self.sample_config.get(sample, {})
+        return cfg.get("color", "tab:blue")
     
     def get_binning(self, var):
 
-        cfg = self.variable_config.get(var, None)
+        cfg = self.variable_config.get(var)
 
         if cfg is None:
             if str(var).startswith("res_"):
@@ -86,84 +91,41 @@ class Plotter:
 
     ### Selection
     def apply_selection(self):
+        print("Selection is lazy: applied only while reading")
 
-        for item in self.all_data:
-            df = item["data"]
+    def selected_plots():
+        return {
+            "control": ["pt_tau", "eta_tau"],
+            "resolution": ["res_pt_tau"]
+        }
+    
+    def _has_columns(self, item, needed):
+        schema = item.get("schema", set())
+        return set(needed).issubset(schema)
 
-            try:
-                item["filtered_data"] = SELECT(df)
-            except Exception as e:
-                print(f" Selection failed for {item['name']}: {e}")
-                item["filtered_data"] = df
-
-    ### Load data
-    def load_data(self):
-        self.all_data = []
-
-        for sample_name, cfg in self.sample_config.items():
-
-            kind = cfg.get("kind", "mc")
-            scale = cfg.get("scale", 1.0)
-            dirs = cfg.get("dirs", [])
-
-            color = self.get_sample_color(sample_name)
-
-            total_files = 0
-
-            for d in dirs:
-                path = (self.project_root / d).resolve()
-
-                if not path.exists():
-                    print(f" Missing path: {path}")
-                    continue
-
-                parquet_files = list(Path(path).rglob("*.parquet"))
-                total_files += len(parquet_files)
-
-                print(f"{sample_name}: {len(parquet_files)} files in {path}")
-
-                for file in parquet_files:
-                    try:
-                        df = pd.read_parquet(file)
-
-                        self.all_data.append({
-                            "name": file.name,
-                            "data": df,
-                            "sample": sample_name,
-                            "kind": kind,
-                            "scale": scale,
-                            "color": color
-                        })
-
-                    except Exception as e:
-                        print(f"ERROR {file}: {e}")
-
-        print(f"Loaded samples: {set(x['sample'] for x in self.all_data)}")
 
     ### Set parameters
     def set_parameters(self):
-        print("Setting parameters")
-
         self.contr_name = []
         self.recon_name = []
 
-        for item in self.all_data:
-            df = item.get("filtered_data", item["data"])
+        print("Setting parameters")
 
+        for item in self.files_index:
             try:
-                cols = plotting(df)
+                cols = list(item.get("schema", []))
+                df = self.data_access.load_parquet(item["path"], columns=cols, selector=SELECT)
+                cfg = plotting(df)
+                self.contr_name.extend(cfg.get("control", []))
+                self.recon_name.extend(cfg.get("resolution", []))
             except Exception as e:
-                print(f" plotting() failed for {item['name']}: {e}")
-                continue
-
-            self.contr_name.extend(cols.get("control", []))
-            self.recon_name.extend(cols.get("resolution", []))
+                print(f"plotting failed for {item['path']}: {e}")
 
         self.contr_name = list(dict.fromkeys(self.contr_name))
         self.recon_name = list(dict.fromkeys(self.recon_name))
 
-        print(f"Control vars: {len(self.contr_name)}, {self.contr_name}")
-        print(f"Resolution vars: {len(self.recon_name)}, {self.recon_name}")
+        print("Control vars:", self.contr_name)
+        print("Resolution vars:", self.recon_name)
 
     ### Batch processing
     def batch(self, batch_size=250):
@@ -185,9 +147,21 @@ class Plotter:
                 key = f"{contr_name}_{recon_name}"
                 self.batch_dfs[key] = []
 
-                for item in self.all_data:
+                for item in self.files_index:
 
-                    df = item.get("filtered_data", item["data"])
+                    df = self.data_access.load_parquet(
+                        item["path"],
+                        columns=self.get_needed_columns(),
+                        selector=SELECT
+                    )
+                    
+                    needed = [contr_name, recon_name, "os"]
+                    if not self._has_columns(item, [contr_name, recon_name]):
+                        continue
+
+                    df = self.data_access.load_parquet(
+                        item["path"], columns=needed, selector=SELECT
+                    )
 
                     if contr_name not in df.columns or recon_name not in df.columns:
                         continue
@@ -222,6 +196,18 @@ class Plotter:
                         "scale": item["scale"]
                     })
 
+    def get_needed_columns(self):
+        return list(set(
+            self.contr_name +
+            self.recon_name +
+            ["os"]
+        ))
+    
+    def load_index(self):
+        self.files_index = self.data_access.build_index()
+        print(f"Indexed files: {len(self.files_index)}")
+    
+
     ### Control plots
     def control_plot(self):
         os.makedirs("plots/control_plots", exist_ok=True)
@@ -233,9 +219,21 @@ class Plotter:
             sample_hists = {}
             bins = None
 
-            for item in self.all_data:
+            for item in self.files_index:
 
-                df = item.get("filtered_data", item["data"])
+                df = self.data_access.load_parquet(
+                    item["path"],
+                    columns=self.get_needed_columns(),
+                    selector=SELECT
+                )
+
+                needed = [contr_name, "os"]
+                if not self._has_columns(item, [contr_name]):
+                    continue
+
+                df = self.data_access.load_parquet(
+                    item["path"], columns=needed, selector=SELECT
+                )
 
                 if contr_name not in df.columns:
                     continue
@@ -397,6 +395,8 @@ class Plotter:
 
         for var in self.contr_name:
 
+            x_min, x_max, bins_cfg = self.get_binning(var)
+
             bin_edges = np.linspace(-self.xlim_ctrl, self.xlim_ctrl, self.bins + 1)
             bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
 
@@ -407,26 +407,37 @@ class Plotter:
 
             sample_kinds = {}
 
-            total_files = len(self.all_data)
+            total_files = len(self.files_index)
             processed_files = 0
 
-            for item in self.all_data:
+            for item in self.files_index:
+
+                needed = [var, "os"]  # CHANGED
+                if not self._has_columns(item, needed):
+                    continue
+
+                df = self.data_access.load_parquet(
+                    item["path"], columns=needed, selector=SELECT
+                )
 
                 processed_files += 1
 
                 if processed_files % 200 == 0 or processed_files == total_files:
-
-                    file_name = item["name"]
-
-                    folder_name = item.get("path", item["sample"])
+                    file_name = Path(item["path"]).name
+                    folder_name = Path(item["path"]).parent
 
                     print(
-                        f"INFO Processed {processed_files}/{total_files} files \n"
-                        f"Current folder: {folder_name} \n"
+                        f"INFO Processed {processed_files}/{total_files} files\n"
+                        f"Current folder: {folder_name}\n"
                         f"Current file: {file_name}"
                     )
 
-                df = item.get("filtered_data", item["data"])
+
+                df = self.data_access.load_parquet(
+                    item["path"],
+                    columns=self.get_needed_columns(),
+                    selector=SELECT
+                )
 
                 if var not in df.columns or "os" not in df.columns:
                     continue
@@ -455,7 +466,6 @@ class Plotter:
                     if not np.any(mask):
                         continue
 
-                    x_min, x_max, bins_cfg = self.get_binning(var)
 
                     bin_edges = np.linspace(x_min, x_max, bins_cfg + 1)
                     bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
@@ -589,9 +599,6 @@ class Plotter:
 
             print(f"MC to Data plots saved to: {out_path}")
 
-
-        
-
 ### MAIN
 if __name__ == "__main__":
     subprocess.run(
@@ -600,7 +607,7 @@ if __name__ == "__main__":
         check=True
     )
     plotter = Plotter(100, 50, 20, 1)
-    plotter.load_data()
+    plotter.load_index()
     plotter.apply_selection()
     plotter.set_parameters()
     plotter.batch(batch_size=250)
