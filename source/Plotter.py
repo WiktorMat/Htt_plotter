@@ -13,6 +13,7 @@ import subprocess
 import sys
 import json
 import matplotlib.gridspec as gridspec
+import logging
 
 from qcd_from_ss import add_qcd_from_ss
 from Selection import *
@@ -115,7 +116,7 @@ class Plotter:
         self.contr_name = []
         self.recon_name = []
 
-        print("Setting parameters")
+        logging.info("Setting parameters")
 
         for item in self.files_index:
             try:
@@ -125,13 +126,13 @@ class Plotter:
                 self.contr_name.extend(cfg.get("control", []))
                 self.recon_name.extend(cfg.get("resolution", []))
             except Exception as e:
-                print(f"plotting failed for {item['path']}: {e}")
+                logging.info(f"plotting failed for {item['path']}: {e}")
 
         self.contr_name = list(dict.fromkeys(self.contr_name))
         self.recon_name = list(dict.fromkeys(self.recon_name))
 
-        print("Control vars:", self.contr_name)
-        print("Resolution vars:", self.recon_name)
+        logging.info("Control vars:", self.contr_name)
+        logging.info("Resolution vars:", self.recon_name)
 
     ### Batch processing
     def batch(self, batch_size=250):
@@ -152,7 +153,7 @@ class Plotter:
     
     def load_index(self):
         self.files_index = self.data_access.build_index()
-        print(f"Indexed files: {len(self.files_index)}")
+        logging.info(f"Indexed files: {len(self.files_index)}")
     
 
     ### Control plots
@@ -202,7 +203,7 @@ class Plotter:
             plt.savefig(f"plots/control_plots/{var}.png", dpi=300, bbox_inches='tight')
             plt.close()
 
-        print(f"Control plots saved to: control plots")
+        logging.info(f"Control plots saved to: control plots")
 
     ### Resolution plots
     def resolution_plot(self):
@@ -266,7 +267,7 @@ class Plotter:
             plt.savefig(f"plots/resolution_plots/Resolution_{r}_from_{c}.png", dpi=300, bbox_inches='tight')
             plt.close()
 
-        print(f"Resolution plots saved to: resolution_plots")
+        logging.info(f"Resolution plots saved to: resolution_plots")
 
     def compute_mc_weight(self, sample_name):
 
@@ -411,9 +412,6 @@ class Plotter:
                 print(f"Skip {var}: empty MC")
                 continue
 
-            # =========================
-            # PLOT
-            # =========================
             fig = plt.figure(figsize=(7, 6))
             gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1], hspace=0.05)
 
@@ -479,7 +477,7 @@ class Plotter:
             plt.savefig(out_path, dpi=300, bbox_inches="tight")
             plt.close()
 
-            print(f"MC to Data plots saved to: {out_path}")
+            logging.info(f"MC to Data plots saved to: {out_path}")
 
 ### MAIN
 if __name__ == "__main__":
@@ -496,3 +494,12 @@ if __name__ == "__main__":
     plotter.batch()
     plotter.resolution_plot()
     plotter.Plot_MC_Data_Agrement()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+                logging.StreamHandler(),
+                logging.FileHandler("plotter.log")
+            ]
+    )
