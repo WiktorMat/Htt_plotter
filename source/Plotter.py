@@ -113,7 +113,7 @@ class Plotter:
 
         for item in self.files_index:
             try:
-                cols = list(item.get("schema", []))
+                cols = list(item["schema"])
                 df = self.data_access.load_parquet(item["path"], columns=cols, selector=SELECT)
                 cfg = plotting(df)
                 self.contr_name.extend(cfg.get("control", []))
@@ -129,72 +129,13 @@ class Plotter:
 
     ### Batch processing
     def batch(self, batch_size=250):
-        print("Creating batches")
-
-        self.batch_dfs = {}
-
+        self.resolution_pairs = []
         for contr_name in self.contr_name:
-
-            suffix = contr_name.split("_", 1)[-1]
-
-            matching = [
-                r for r in self.recon_name
-                if r.split("_", 1)[-1] == suffix
-            ]
-
-            for recon_name in matching:
-
-                key = f"{contr_name}_{recon_name}"
-                self.batch_dfs[key] = []
-
-                for item in self.files_index:
-
-                    df = self.data_access.load_parquet(
-                        item["path"],
-                        columns=self.get_needed_columns(),
-                        selector=SELECT
-                    )
-                    
-                    needed = [contr_name, recon_name, "os"]
-                    if not self._has_columns(item, [contr_name, recon_name]):
-                        continue
-
-                    df = self.data_access.load_parquet(
-                        item["path"], columns=needed, selector=SELECT
-                    )
-
-                    if contr_name not in df.columns or recon_name not in df.columns:
-                        continue
-
-                    c = df[contr_name]
-                    r = df[recon_name]
-
-                    mask = c.notna() & r.notna() & (c != 0)
-
-                    c = c[mask]
-                    r = r[mask]
-
-                    if len(c) == 0:
-                        continue
-
-                    resolution = (r - c) / c
-                    resolution = resolution.replace([np.inf, -np.inf], np.nan).dropna()
-
-                    if len(resolution) == 0:
-                        continue
-
-                    batches = [
-                        resolution.iloc[i:i + batch_size].reset_index(drop=True)
-                        for i in range(0, len(resolution), batch_size)
-                    ]
-
-                    self.batch_dfs[key].append({
-                        "name": item["name"],
-                        "data": pd.concat(batches, axis=1),
-                        "sample": item["sample"],
-                        "kind": item["kind"],
-                        "scale": item["scale"]
-                    })
+            suffix = contr_name.split("_",1)[-1]
+            for recon_name in self.recon_name:
+                if recon_name.split("_",1)[-1] == suffix:
+                    self.resolution_pairs.append((contr_name, recon_name))
+    
 
     def get_needed_columns(self):
         return list(set(
@@ -211,167 +152,100 @@ class Plotter:
     ### Control plots
     def control_plot(self):
         os.makedirs("plots/control_plots", exist_ok=True)
+        vars_all = self.contr_name
+        hists = {v:{} for v in vars_all}
+        bins_map = {v:self.get_binning(v) for v in vars_all}
 
-        for contr_name in self.contr_name:
-
-            plt.figure(figsize=(8, 6))
-
-            sample_hists = {}
-            bins = None
-
-            for item in self.files_index:
-
-                df = self.data_access.load_parquet(
-                    item["path"],
-                    columns=self.get_needed_columns(),
-                    selector=SELECT
-                )
-
-                needed = [contr_name, "os"]
-                if not self._has_columns(item, [contr_name]):
-                    continue
-
-                df = self.data_access.load_parquet(
-                    item["path"], columns=needed, selector=SELECT
-                )
-
-                if contr_name not in df.columns:
-                    continue
-
-                values = df[contr_name].dropna().to_numpy()
-
-                if len(values) == 0:
-                    continue
-
-                weights = np.ones(len(values))
-
-                if item.get("kind", "mc") != "data":
-                    weights *= item.get("scale", 1.0)
-
-                x_min, x_max, bins_cfg = self.get_binning(contr_name)
-
-                counts, bins = np.histogram(
-                    values,
-                    bins=bins_cfg,
-                    range=(x_min, x_max),
-                    weights=weights
-                )
-
-                sample = item["sample"]
-
-                if sample not in sample_hists:
-                    sample_hists[sample] = counts.astype(float)
-                else:
-                    sample_hists[sample] += counts.astype(float)
-
-            if not sample_hists:
-                print(f"No data for {contr_name}")
-                plt.close()
+        for item in self.files_index:
+            available = [v for v in vars_all if v in item.get("schema", set())]
+            if not available:
                 continue
+            df = self.data_access.load_parquet(item["path"], columns=available+["os"], selector=SELECT)
+            sample = item["sample"]
+            scale = item.get("scale",1.0) if item.get("kind","mc") != "data" else 1.0
 
-            bottom = np.zeros(len(bins) - 1)
+            for var in available:
+                vals = df[var].dropna().to_numpy()
+                if len(vals) == 0:
+                    continue
+                x_min,x_max,nb = bins_map[var]
+                counts,_ = np.histogram(vals, bins=nb, range=(x_min,x_max), weights=np.ones(len(vals))*scale)
+                hists[var].setdefault(sample, np.zeros(nb))
+                hists[var][sample] += counts
 
-            for sample, counts in sample_hists.items():
-
-                plt.bar(
-                    bins[:-1],
-                    counts,
-                    width=np.diff(bins),
-                    bottom=bottom,
-                    color=self.get_sample_color(sample),
-                    edgecolor="black",
-                    label=sample,
-                    align="edge"
-                )
-
+        for var in vars_all:
+            if not hists[var]:
+                continue
+            x_min,x_max,nb = bins_map[var]
+            edges = np.linspace(x_min,x_max,nb+1)
+            bottom = np.zeros(nb)
+            plt.figure(figsize=(8,6))
+            for sample,counts in hists[var].items():
+                plt.bar(edges[:-1], counts, width=np.diff(edges), bottom=bottom, align='edge', label=sample, color=self.get_sample_color(sample), edgecolor='black')
                 bottom += counts
-
-            plt.title(f"Control: {contr_name}")
-            plt.xlabel(contr_name)
+            plt.title(f"Control: {var}")
+            plt.xlabel(var)
             plt.ylabel("Events")
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-
-            out_path = f"plots/control_plots/{contr_name}.png"
-            plt.savefig(out_path, dpi=300, bbox_inches="tight")
+            plt.legend(); plt.grid(True, alpha=0.3)
+            plt.savefig(f"plots/control_plots/{var}.png", dpi=300, bbox_inches='tight')
             plt.close()
 
-            print(f"Control plots saved to: {out_path}")
+        print(f"Control plots saved to: control plots")
 
     ### Resolution plots
     def resolution_plot(self):
         os.makedirs("plots/resolution_plots", exist_ok=True)
 
-        for key in self.batch_dfs.keys():
+        if not hasattr(self, "resolution_pairs"):
+            self.batch()
 
-            contr, recon = key.rsplit("_", 1)
-            res_var = f"res_{recon}"
 
-            x_min, x_max, bins_cfg = self.get_binning(res_var)
-            bin_edges = np.linspace(x_min, x_max, bins_cfg + 1)
+        pair_hists = {}
+        pair_bins = {}
 
-            sample_hists = {}
+        for c,r in self.resolution_pairs:
+            res_var = f"res_{r}"
+            x_min,x_max,nb = self.get_binning(res_var)
+            pair_hists[(c,r)] = {}
+            pair_bins[(c,r)] = np.linspace(x_min,x_max,nb+1)
 
-            for item in self.batch_dfs[key]:
-
-                values = item["data"].values.flatten()
-                values = pd.Series(values).dropna()
-
-                if len(values) == 0:
-                    continue
-
-                weights = np.ones(len(values))
-
-                if item.get("kind", "mc") != "data":
-                    weights *= item.get("scale", 1.0)
-
-                counts, _ = np.histogram(
-                    values,
-                    bins=bin_edges,
-                    range=(x_min, x_max),
-                    weights=weights
-                )
-
-                sample = item["sample"]
-
-                if sample not in sample_hists:
-                    sample_hists[sample] = counts.astype(float)
-                else:
-                    sample_hists[sample] += counts.astype(float)
-
-            if not sample_hists:
-                print(f"No data for {key}")
+        for item in self.files_index:
+            available = [(c,r) for c,r in self.resolution_pairs if c in item.get("schema",set()) and r in item.get("schema",set())]
+            if not available:
                 continue
+            cols = sorted(set([x for p in available for x in p] + ["os"]))
+            df = self.data_access.load_parquet(item["path"], columns=cols, selector=SELECT)
+            sample = item["sample"]
+            scale = item.get("scale",1.0) if item.get("kind","mc") != "data" else 1.0
 
-            plt.figure()
-            bottom = np.zeros(len(bin_edges) - 1)
+            for c,r in available:
+                cv = df[c].to_numpy(); rv = df[r].to_numpy()
+                mask = np.isfinite(cv) & np.isfinite(rv) & (cv != 0)
+                if not np.any(mask):
+                    continue
+                res = (rv[mask]-cv[mask])/cv[mask]
+                edges = pair_bins[(c,r)]
+                counts,_ = np.histogram(res, bins=edges, weights=np.ones(len(res))*scale)
+                pair_hists[(c,r)].setdefault(sample, np.zeros(len(edges)-1))
+                pair_hists[(c,r)][sample] += counts
 
-            for sample, counts in sample_hists.items():
-
-                plt.bar(
-                    bin_edges[:-1],
-                    counts,
-                    width=np.diff(bin_edges),
-                    bottom=bottom,
-                    color=self.get_sample_color(sample),
-                    edgecolor="black",
-                    label=sample,
-                    align="edge"
-                )
-
+        for (c,r),samples in pair_hists.items():
+            if not samples:
+                continue
+            edges = pair_bins[(c,r)]
+            bottom = np.zeros(len(edges)-1)
+            plt.figure(figsize=(8,6))
+            for sample,counts in samples.items():
+                plt.bar(edges[:-1], counts, width=np.diff(edges), bottom=bottom, align='edge', label=sample, color=self.get_sample_color(sample), edgecolor='black')
                 bottom += counts
-
-            plt.title(f"Resolution: {recon} vs {contr}")
-            plt.xlabel(res_var)
+            plt.title(f"Resolution: {r} vs {c}")
+            plt.xlabel(f"res_{r}")
             plt.ylabel("Events")
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-
-            out_path = f"plots/resolution_plots/Resolution_{recon}_from_{contr}.png"
-            plt.savefig(out_path, dpi=300)
+            plt.legend(); plt.grid(True, alpha=0.3)
+            plt.savefig(f"plots/resolution_plots/Resolution_{r}_from_{c}.png", dpi=300, bbox_inches='tight')
             plt.close()
 
-            print(f"Resolution plots saved to: {out_path}")
+        print(f"Resolution plots saved to: resolution_plots")
 
     def compute_mc_weight(self, sample_name):
         p = self.params.get(sample_name, None)
@@ -391,15 +265,14 @@ class Plotter:
 
     def Plot_MC_Data_Agrement(self):
         os.makedirs("plots/mc_data_plots", exist_ok=True)
-        used_labels = set()
 
         for var in self.contr_name:
 
             x_min, x_max, bins_cfg = self.get_binning(var)
-
-            bin_edges = np.linspace(-self.xlim_ctrl, self.xlim_ctrl, self.bins + 1)
+            bin_edges = np.linspace(x_min, x_max, bins_cfg + 1)
             bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
 
+            # --- storage ---
             histograms = {
                 "OS": {},
                 "SS": {}
@@ -412,26 +285,8 @@ class Plotter:
 
             for item in self.files_index:
 
-                needed = [var, "os"]  # CHANGED
-                if not self._has_columns(item, needed):
+                if var not in item.get("schema", set()) or "os" not in item.get("schema", set()):
                     continue
-
-                df = self.data_access.load_parquet(
-                    item["path"], columns=needed, selector=SELECT
-                )
-
-                processed_files += 1
-
-                if processed_files % 200 == 0 or processed_files == total_files:
-                    file_name = Path(item["path"]).name
-                    folder_name = Path(item["path"]).parent
-
-                    print(
-                        f"INFO Processed {processed_files}/{total_files} files\n"
-                        f"Current folder: {folder_name}\n"
-                        f"Current file: {file_name}"
-                    )
-
 
                 df = self.data_access.load_parquet(
                     item["path"],
@@ -442,55 +297,55 @@ class Plotter:
                 if var not in df.columns or "os" not in df.columns:
                     continue
 
+                processed_files += 1
+
+                if processed_files % 200 == 0 or processed_files == total_files:
+                    print(
+                        f"INFO Processed {processed_files}/{total_files} files\n"
+                        f"File: {Path(item['path']).name}"
+                    )
+
                 sample = item["sample"]
                 kind = item.get("kind", "mc")
-                scale = item.get("scale", 1.0)
-
                 sample_kinds[sample] = kind
 
                 values = df[var].to_numpy()
                 os_flag = df["os"].to_numpy()
 
-                weights = np.ones(len(values))
-                if item.get("kind", "mc") != "data":
-                    scale = self.compute_mc_weight(item["sample"])
-                    weights *= scale
+                weight = self.compute_mc_weight(sample) if kind != "data" else 1.0
+                weights = np.ones(len(values)) * weight
 
                 regions = {
-                    "OS": (os_flag == 1),
-                    "SS": (os_flag == 0)
+                    "OS": os_flag == 1,
+                    "SS": os_flag == 0
                 }
 
-                for region_name, mask in regions.items():
+                for region_name, region_mask in regions.items():
 
+                    mask = region_mask & np.isfinite(values)
                     if not np.any(mask):
                         continue
 
-
-                    bin_edges = np.linspace(x_min, x_max, bins_cfg + 1)
-                    bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-
-                    counts, bins = np.histogram(
-                        values,
-                        bins=bins_cfg,
-                        range=(x_min, x_max),
-                        weights=weights
+                    counts, _ = np.histogram(
+                        values[mask],
+                        bins=bin_edges,
+                        weights=np.ones(mask.sum()) * weight
                     )
 
                     sumw2, _ = np.histogram(
                         values[mask],
                         bins=bin_edges,
-                        weights=weights[mask] ** 2
+                        weights=np.ones(mask.sum()) * (weight ** 2)
                     )
 
                     if sample not in histograms[region_name]:
                         histograms[region_name][sample] = {
-                            "counts": counts,
-                            "sumw2": sumw2
+                            "counts": np.zeros(len(bin_edges) - 1),
+                            "sumw2": np.zeros(len(bin_edges) - 1)
                         }
-                    else:
-                        histograms[region_name][sample]["counts"] += counts
-                        histograms[region_name][sample]["sumw2"] += sumw2
+
+                    histograms[region_name][sample]["counts"] += counts
+                    histograms[region_name][sample]["sumw2"] += sumw2
 
             config = {
                 "add_qcd_from_ss": True,
@@ -503,34 +358,36 @@ class Plotter:
 
             data_counts = None
             data_sumw2 = None
-
             mc_samples = {}
 
             for name, hist in samples.items():
 
-                counts = hist["counts"]
-
                 if sample_kinds.get(name, "mc") == "data":
                     if data_counts is None:
-                        data_counts = counts.copy()
+                        data_counts = hist["counts"].copy()
                         data_sumw2 = hist["sumw2"].copy()
                     else:
-                        data_counts += counts
+                        data_counts += hist["counts"]
                         data_sumw2 += hist["sumw2"]
-
                 else:
-                    mc_samples[name] = counts.copy()
+                    mc_samples[name] = hist["counts"].copy()
 
             if data_counts is None:
                 print("No data found")
-                return
+                continue
 
             total_mc = np.zeros_like(data_counts)
 
             for vals in mc_samples.values():
                 total_mc += vals
 
+            if np.all(total_mc == 0):
+                print(f"Skip {var}: empty MC")
+                continue
 
+            # =========================
+            # PLOT
+            # =========================
             fig = plt.figure(figsize=(7, 6))
             gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1], hspace=0.05)
 
@@ -542,7 +399,6 @@ class Plotter:
             for name, vals in mc_samples.items():
 
                 color = "gray" if name == "QCD" else self.get_sample_color(name)
-
                 label = "QCD (from SS)" if name == "QCD" else name
 
                 ax.bar(
@@ -610,7 +466,7 @@ if __name__ == "__main__":
     plotter.load_index()
     plotter.apply_selection()
     plotter.set_parameters()
-    plotter.batch(batch_size=250)
     plotter.control_plot()
+    plotter.batch()
     plotter.resolution_plot()
     plotter.Plot_MC_Data_Agrement()

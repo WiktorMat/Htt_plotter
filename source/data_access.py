@@ -16,7 +16,7 @@ class DataAccess:
         dt = time.perf_counter() - t0
         self._parquet_read_count += 1
         if self._parquet_read_count % self.log_every_files == 0:
-            print(f"[I/O] read {self._parquet_read_count} files | last={dt:.3f}s | {Path(file_path).name}")
+            print(f"I/O read {self._parquet_read_count} files | last={dt:.3f}s | {Path(file_path).name}")
         return df
 
     def load_parquet(self, file_path, columns=None, selector=None):
@@ -37,7 +37,7 @@ class DataAccess:
             for d in cfg.get("dirs", []):
                 path = (self.project_root / d).resolve()
                 if not path.exists():
-                    print(f"[WARN] Missing path: {path}")
+                    print(f"WARN Missing path: {path}")
                     continue
                 for file in path.rglob("*.parquet"):
                     schema = self.get_schema(file)
