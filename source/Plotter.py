@@ -18,6 +18,15 @@ from qcd_from_ss import add_qcd_from_ss
 from Selection import *
 from data_access import *
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler("plotter.log")
+        ]
+)
+
 
 class Plotter:
     def __init__(self, xlim_contrl=None, xlim_resolution=None, bins=20, alpha=1):
@@ -473,30 +482,3 @@ class Plotter:
             plt.close()
 
             logging.info(f"Saved: {out_path}")
-
-
-###  MAIN
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-                logging.StreamHandler(),
-                logging.FileHandler("plotter.log")
-            ]
-    )
-
-    subprocess.run(
-        [sys.executable, "json_generator.py"],
-        cwd=project_root / "source",
-        check=True
-    )
-
-    plotter = Plotter(100, 50, 20, 1)
-    plotter.load_index()
-    plotter.apply_selection()
-    plotter.set_parameters()
-    plotter.control_plot()
-    plotter.batch()
-    plotter.resolution_plot()
-    plotter.Plot_MC_Data_Agrement()
