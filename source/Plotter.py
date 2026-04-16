@@ -45,7 +45,13 @@ class Plotter:
 
         self.contr_name = []
         self.recon_name = []
+        self.resolution_pairs = []
+        self._resolution_bins = {}
         self.resolution_pairs_config = RESOLUTION_PAIRS
+
+        self._control_hists = {var: {} for var in self.contr_name}
+        self._resolution_hists = {}
+        self._mc_hists = {var: {"OS": {}, "SS": {}} for var in self.contr_name}
 
         from config_loader import load_configs
 
@@ -173,12 +179,15 @@ class Plotter:
     ### Batch processing
     def batch(self):
         self.resolution_pairs = []
+        self._resolution_bins = {}
 
         available = set(self.contr_name + self.recon_name)
 
         for c, r in self.resolution_pairs_config:
             if c in available and r in available:
                 self.resolution_pairs.append((c, r))
+                _, _, _, edges = self.get_binning(f"res_{r}")
+                self._resolution_bins[(c, r)] = edges
 
 
     def add_histogram(self, container, sample, counts):
@@ -213,6 +222,84 @@ class Plotter:
         plt.grid(True, alpha=0.3)
         plt.savefig(out_path, dpi=300, bbox_inches="tight")
         plt.close()
+
+
+    def process_file(self, item):
+        cols = list(item["schema"])
+        df = self.load_dataframe(item, cols)
+
+        sample = item["sample"]
+        kind = item.get("kind", "mc")
+        scale = self.get_scale(item)
+
+        for var in self.contr_name:
+            if var not in df.columns:
+                continue
+
+            values = df[var].dropna().to_numpy()
+            if len(values) == 0:
+                continue
+
+            x_min, x_max, nb, edges = self.get_binning(var)
+
+            counts, _ = np.histogram(values, bins=nb, range=(x_min, x_max))
+            counts = counts.astype(float) * scale
+
+            self._control_hists.setdefault(var, {})
+            self._control_hists[var].setdefault(sample, np.zeros(len(edges)-1))
+            self._control_hists[var][sample] += counts
+
+        for c, r in self.resolution_pairs:
+            if c not in df.columns or r not in df.columns:
+                continue
+
+            cv = df[c].to_numpy()
+            rv = df[r].to_numpy()
+
+            mask = np.isfinite(cv) & np.isfinite(rv) & (cv != 0)
+            if not np.any(mask):
+                continue
+
+            resolution = (rv[mask] - cv[mask]) / cv[mask]
+            edges = self._resolution_bins[(c, r)]
+
+            counts, _ = np.histogram(resolution, bins=edges)
+            counts = counts.astype(float) * scale
+
+            self._resolution_hists.setdefault((c, r), {})
+            self._resolution_hists[(c, r)].setdefault(sample, np.zeros(len(edges)-1))
+            self._resolution_hists[(c, r)][sample] += counts
+
+        if "os" not in df.columns:
+            return
+
+        os_flag = df["os"].to_numpy()
+        weight = 1.0 if kind == "data" else self.compute_mc_weight(sample)
+
+        for var in self.contr_name:
+            if var not in df.columns:
+                continue
+
+            vals = df[var].to_numpy()
+
+            for region_name, region_mask in {
+                "OS": os_flag == 1,
+                "SS": os_flag == 0
+            }.items():
+
+                mask = region_mask & np.isfinite(vals)
+                if not np.any(mask):
+                    continue
+
+                _, _, _, bin_edges = self.get_binning(var)
+
+                counts, _ = np.histogram(vals[mask], bins=bin_edges)
+                counts = counts * weight
+
+                self._mc_hists.setdefault(var, {"OS": {}, "SS": {}})
+
+                self._mc_hists[var][region_name].setdefault(sample, np.zeros(len(bin_edges)-1))
+                self._mc_hists[var][region_name][sample] += counts
 
     ### Control plots
     def control_plot(self):

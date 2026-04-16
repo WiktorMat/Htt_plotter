@@ -27,7 +27,12 @@ if __name__ == "__main__":
     plotter.load_index()
     plotter.apply_selection()
     plotter.set_parameters()
-    plotter.control_plot()
+    
     plotter.batch()
+    
+    for item in plotter.files_index:
+        plotter.process_file(item)
+
+    plotter.control_plot()
     plotter.resolution_plot()
     plotter.Plot_MC_Data_Agrement()

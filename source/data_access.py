@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 import time
 from Configurations.config_0.Config import *
+from Selection import SELECT
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,16 +59,13 @@ class DataAccess:
         ext = Path(path).suffix.lower()
 
         if ext == ".parquet":
-            dataset = ds.dataset(path, format="parquet")
+            table = ds.dataset(path, format="parquet").to_table(columns=columns)
+            df = table.to_pandas()
 
-            filter_expr = self._convert_selector_to_arrow()
+            if selector is not None:
+                df = selector(df)
 
-            table = dataset.to_table(
-                columns=columns,
-                filter=filter_expr
-            )
-
-            return table.to_pandas()
+            return df
 
         elif ext == ".csv":
             return self.load_csv(path, columns=columns, selector=selector)
@@ -124,7 +122,7 @@ class DataAccess:
                 elif ext == ".parquet":
                     schema = set(pd.read_parquet(file_path).columns)
 
-                sample = next((p for p in file_path.parts if p in process), file_path.parent.name)
+                sample = file_path.parent.name
 
                 index.append({
                     "path": file_path,
