@@ -1,8 +1,11 @@
-from pathlib import Path
-import time
-import pyarrow.parquet as pq
+import pyarrow.dataset as ds
+from functools import reduce
+import pyarrow.compute as pc
+import pyarrow as pa
 import pandas as pd
 import logging
+from pathlib import Path
+import time
 from Configurations.config_0.Config import *
 
 logging.basicConfig(
@@ -22,6 +25,26 @@ class DataAccess:
         self.log_every_files = log_every_files
         self.base_path = (self.project_root / "data").resolve()
 
+    def _convert_selector_to_arrow(self):
+        exprs = []
+
+        if PT_1_CUT is not None:
+            exprs.append(ds.field("pt_1") > PT_1_CUT)
+
+        if PT_2_CUT is not None:
+            exprs.append(ds.field("pt_2") > PT_2_CUT)
+
+        if ETA_1_CUT is not None:
+            exprs.append(pc.abs(ds.field("eta_1")) < ETA_1_CUT)
+
+        if ETA_2_CUT is not None:
+            exprs.append(pc.abs(ds.field("eta_2")) < ETA_2_CUT)
+
+        if not exprs:
+            return None
+
+        return reduce(lambda a, b: pc.and_(a, b), exprs)
+    
     def _read_parquet(self, file_path, columns=None):
         t0 = time.perf_counter()
         df = pd.read_parquet(file_path, columns=columns)
@@ -31,17 +54,33 @@ class DataAccess:
             print(f"I/O read {self._parquet_read_count} files | last={dt:.3f}s | {Path(file_path).name}")
         return df
 
-    def load_parquet(self, file_path, columns=None, selector=None):
-        df = self._read_parquet(file_path, columns=columns)
-        if selector is not None:
-            try:
-                df = selector(df)
-            except Exception as e:
-                logging.warning(f"Selection failed: {file_path} -> {e}")
-        return df
+    def load_dataset(self, path, columns=None, selector=None):
+        ext = Path(path).suffix.lower()
+
+        if ext == ".parquet":
+            dataset = ds.dataset(path, format="parquet")
+
+            filter_expr = self._convert_selector_to_arrow()
+
+            table = dataset.to_table(
+                columns=columns,
+                filter=filter_expr
+            )
+
+            return table.to_pandas()
+
+        elif ext == ".csv":
+            return self.load_csv(path, columns=columns, selector=selector)
+
+        else:
+            raise ValueError(f"Unsupported format: {ext}")
     
     def load_csv(self, path, columns=None, selector=None):
-        df = pd.read_csv(path, usecols=columns)
+        df = pd.read_csv(path)
+
+        if columns is not None:
+            columns = [c for c in columns if c in df.columns]
+            df = df[columns]
 
         if selector is not None:
             try:

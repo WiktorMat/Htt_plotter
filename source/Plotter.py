@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import pyarrow as pa
 
 project_root = Path(__file__).resolve().parent.parent
 sys.path.append(str(project_root))
@@ -83,7 +84,7 @@ class Plotter:
         available_cols = [col for col in columns if col in schema]
 
         if ext == ".parquet":
-            return self.data_access.load_parquet(
+            return self.data_access.load_dataset(
                 path,
                 columns=available_cols,
                 selector=SELECT
@@ -199,7 +200,7 @@ class Plotter:
                 width=np.diff(edges),
                 bottom=bottom,
                 align="edge",
-                label=self.get_sample_label(sample),
+                label=sample,
                 color=self.get_sample_color(sample),
                 edgecolor="black"
             )
@@ -229,7 +230,16 @@ class Plotter:
             if not available:
                 continue
 
-            df = self.load_dataframe(item, available + ["os"])
+            cols = available.copy()
+            if item["kind"] == "data" or "os" in item.get("schema", set()):
+                cols.append("os")
+
+            df = self.data_access.load_dataset(
+                item["path"],
+                columns=cols,
+                selector=SELECT
+            )
+
             sample = item["sample"]
             scale = self.get_scale(item)
 

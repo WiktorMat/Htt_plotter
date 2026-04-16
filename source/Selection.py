@@ -8,7 +8,11 @@ SELECTION_COLUMNS = [
     "pt_1",
     "pt_2",
     "eta_1",
-    "eta_2"
+    "eta_2",
+    "trueMETx",
+    "METx",
+    "trueMETy",
+    "METy"
 ]
 
 def selection(df):
