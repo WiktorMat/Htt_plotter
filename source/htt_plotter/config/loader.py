@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 
 import yaml
@@ -32,6 +33,16 @@ def load_configs(project_root: Path, config_name: str = "config_0"):
         variables_path = source_dir / "variables.json"
 
     plotter_path = config_dir / "plotter.yaml"
+
+    logger = logging.getLogger(__name__)
+    logger.info("Loading config '%s'", config_name)
+    logger.info(
+        "Config paths: files=%s | params=%s | variables=%s | plotter=%s",
+        files_path,
+        params_path,
+        variables_path,
+        plotter_path,
+    )
 
     if not files_path.exists():
         raise FileNotFoundError(

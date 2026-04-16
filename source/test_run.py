@@ -1,38 +1,48 @@
+import logging
 import sys
 import subprocess
 from pathlib import Path
 
-from Plotter import Plotter
+from htt_plotter import Plotter
 
 project_root = Path(__file__).resolve().parent.parent
 
 if __name__ == "__main__":
 
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler("plotter.log"),
+        ],
+    )
+
     config_name = "config_0"
 
-    subprocess.run(
-        [sys.executable, "json_generator.py"],
-        cwd=project_root / "source",
-        check=True
-    )
+    config_dir = project_root / "Configurations" / config_name
+
+    # Ensure we have an explicit per-config file list for performance.
+    # (We still allow source/files.json as a fallback via the config loader.)
+    if not (config_dir / "files.json").exists():
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "htt_plotter.tools.json_generator",
+                "--config-name",
+                config_name,
+            ],
+            cwd=project_root / "source",
+            check=True,
+        )
 
     plotter = Plotter(
         100,
         50,
         20,
         1,
-        config_name=config_name
+        config_name=config_name,
     )
 
-    plotter.load_index()
-    plotter.apply_selection()
-    plotter.set_parameters()
-    
-    plotter.batch()
-    
-    for item in plotter.files_index:
-        plotter.process_file(item)
-
-    plotter.control_plot()
-    plotter.resolution_plot()
-    plotter.Plot_MC_Data_Agrement()
+    plotter.run_all()
