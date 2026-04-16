@@ -1,4 +1,4 @@
-###Files .parquet
+###Files
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -27,3 +27,18 @@ IP_LENSIG_1_CUT = 1
 ###Plotting
 CONTROL = ["trueMETx", "trueMETy", "pt_1", "eta_1"]
 RESOL = ["METx", "METy", "pt_2", "eta_2"]
+
+
+RESOLUTION_PAIRS = [
+    ("trueMETx", "METx"),
+    ("trueMETy", "METy"),
+    ("pt_1", "pt_2"),
+    ("eta_1", "eta_2"),
+]
+
+SAMPLE_LABELS = {
+    "DYto2Mu-2Jets_Bin-0J-MLL-50": "DY → 2μ",
+    "DYto2Tau-2Jets_Bin-0J-MLL-50": "DY → 2τ",
+    "TTto2L2Nu": "tt̄ dilepton",
+    "WtoTauNu-2Jets": "W → τν"
+}

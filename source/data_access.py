@@ -2,6 +2,17 @@ from pathlib import Path
 import time
 import pyarrow.parquet as pq
 import pandas as pd
+import logging
+from Configurations.config_0.Config import *
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler("plotter.log")
+        ]
+)
 
 class DataAccess:
     def __init__(self, project_root, sample_config, log_every_files=200):
@@ -9,6 +20,7 @@ class DataAccess:
         self.sample_config = sample_config
         self._parquet_read_count = 0
         self.log_every_files = log_every_files
+        self.base_path = (self.project_root / "data").resolve()
 
     def _read_parquet(self, file_path, columns=None):
         t0 = time.perf_counter()
@@ -25,7 +37,18 @@ class DataAccess:
             try:
                 df = selector(df)
             except Exception as e:
-                print(f"[WARN] Selection failed: {file_path} -> {e}")
+                logging.warning(f"Selection failed: {file_path} -> {e}")
+        return df
+    
+    def load_csv(self, path, columns=None, selector=None):
+        df = pd.read_csv(path, usecols=columns)
+
+        if selector is not None:
+            try:
+                df = selector(df)
+            except Exception:
+                pass
+
         return df
 
     def get_schema(self, path):
@@ -33,21 +56,47 @@ class DataAccess:
 
     def build_index(self):
         index = []
-        for sample_name, cfg in self.sample_config.items():
-            for d in cfg.get("dirs", []):
-                path = (self.project_root / d).resolve()
-                if not path.exists():
-                    print(f"WARN Missing path: {path}")
-                    continue
-                for file in path.rglob("*.parquet"):
-                    schema = self.get_schema(file)
-                    index.append({
-                        "path": file,
-                        "name": file.stem,
-                        "sample": sample_name,
-                        "kind": cfg.get("kind", "mc"),
-                        "scale": cfg.get("scale", 1.0),
-                        "color": cfg.get("color", None),
-                        "schema": set(schema),
-                    })
+
+        logging.info(f"BASE PATH: {self.base_path}")
+
+        if not self.base_path.exists():
+            logging.warning("PATH DOES NOT EXIST!")
+            return index
+
+        files = list(self.base_path.rglob("*"))
+
+        logging.info(f"ALL FILES FOUND: {len(files)}")
+
+        for file_path in files:
+            if not file_path.is_file():
+                continue
+
+            ext = file_path.suffix.lower()
+
+            logging.info(f"CHECK: {file_path}")
+
+            if ext not in [".csv", ".parquet"]:
+                continue
+
+            try:
+                if ext == ".csv":
+                    schema = set(pd.read_csv(file_path, nrows=0).columns)
+
+                elif ext == ".parquet":
+                    schema = set(pd.read_parquet(file_path).columns)
+
+                sample = next((p for p in file_path.parts if p in process), file_path.parent.name)
+
+                index.append({
+                    "path": file_path,
+                    "sample": sample,
+                    "schema": schema,
+                    "kind": "data" if "data" in sample.lower() else "mc"
+                })
+
+                logging.info(f"ADDED: {file_path}")
+
+            except Exception as e:
+                logging.warning(f"ERROR:: {file_path}, {e}")
+
         return index

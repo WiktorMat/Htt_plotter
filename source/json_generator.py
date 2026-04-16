@@ -39,7 +39,6 @@ def scan_samples():
 
         for syst_dir in process_dir.iterdir():
             if syst_dir.is_dir():
-                # check if contains parquet
                 if list(syst_dir.rglob("*.parquet")):
                     dirs.append(str(syst_dir.as_posix()))
 

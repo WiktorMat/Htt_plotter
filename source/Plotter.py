@@ -1,7 +1,5 @@
 import sys
 import os
-import json
-import yaml
 import logging
 import subprocess
 from pathlib import Path
@@ -46,7 +44,7 @@ class Plotter:
 
         self.contr_name = []
         self.recon_name = []
-        self.resolution_pairs = []
+        self.resolution_pairs_config = RESOLUTION_PAIRS
 
         from config_loader import load_configs
 
@@ -61,6 +59,8 @@ class Plotter:
             self.sample_config,
             self.log_every_files
         )
+        self.base_path = (self.project_root / BASE_PATH).resolve()
+
 
     ### Colors
     def get_sample_color(self, sample):
@@ -76,18 +76,34 @@ class Plotter:
         logging.info(f"Indexed files: {len(self.files_index)}")
 
     def load_dataframe(self, item, columns):
-        return self.data_access.load_parquet(
-            item["path"],
-            columns=columns,
-            selector=SELECT
-        )
+        path = item["path"]
+        ext = Path(path).suffix.lower()
+
+        schema = item.get("schema", set())
+        available_cols = [col for col in columns if col in schema]
+
+        if ext == ".parquet":
+            return self.data_access.load_parquet(
+                path,
+                columns=available_cols,
+                selector=SELECT
+            )
+
+        elif ext == ".csv":
+            return self.data_access.load_csv(
+                path,
+                columns=available_cols,
+                selector=SELECT
+            )
+
+        else:
+            raise ValueError(f"Unsupported file format: {ext}")
 
     def get_scale(self, item):
         return item.get("scale", 1.0) if item.get("kind", "mc") != "data" else 1.0
 
     def unique_list(self, values):
         return list(dict.fromkeys(values))
-
 
     def get_binning(self, var):
         if var in self._bin_cache:
@@ -111,7 +127,9 @@ class Plotter:
 
         self._bin_cache[var] = result
         return result
-
+    
+    def get_sample_label(self, sample):
+        return self.sample_config.get(sample, {}).get("label", sample)
 
     def apply_selection(self):
         logging.debug("Selection is lazy: applied only while reading")
@@ -152,15 +170,14 @@ class Plotter:
         logging.info(f"Resolution vars: {self.recon_name}")
 
     ### Batch processing
-    def batch(self, batch_size=250):
+    def batch(self):
         self.resolution_pairs = []
 
-        for control_var in self.contr_name:
-            suffix = control_var.split("_", 1)[-1]
+        available = set(self.contr_name + self.recon_name)
 
-            for reco_var in self.recon_name:
-                if reco_var.split("_", 1)[-1] == suffix:
-                    self.resolution_pairs.append((control_var, reco_var))
+        for c, r in self.resolution_pairs_config:
+            if c in available and r in available:
+                self.resolution_pairs.append((c, r))
 
 
     def add_histogram(self, container, sample, counts):
@@ -182,7 +199,7 @@ class Plotter:
                 width=np.diff(edges),
                 bottom=bottom,
                 align="edge",
-                label=sample,
+                label=self.get_sample_label(sample),
                 color=self.get_sample_color(sample),
                 edgecolor="black"
             )
