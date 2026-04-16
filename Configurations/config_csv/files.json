@@ -1,0 +1,18 @@
+{
+  "HiggsCSV": {
+    "kind": "mc",
+    "scale": 1.0,
+    "color": "tab:blue",
+    "files": [
+      "data/Higgs.csv"
+    ]
+  },
+  "Z0CSV": {
+    "kind": "mc",
+    "scale": 1.0,
+    "color": "tab:orange",
+    "files": [
+      "data/Z0.csv"
+    ]
+  }
+}
