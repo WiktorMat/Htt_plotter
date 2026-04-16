@@ -1,0 +1,22 @@
+selection:
+  pt_1_min: 25
+  pt_2_min: 20
+  eta_1_abs_max: 2.4
+  eta_2_abs_max: 2.3
+  decayModePNet_2_eq: 1
+  idDeepTau2018v2p5VSjet_2_min: 5
+  idDeepTau2018v2p5VSe_2_min: 2
+  idDeepTau2018v2p5VSmu_2_min: 4
+  iso_1_max: 0.15
+  ip_LengthSig_1_abs_min: 1
+
+plotting:
+  control:
+    - pt_1
+    - eta_1
+    - m_vis
+  resolution:
+    - METx
+    - METy
+    - pt_2
+    - eta_2
