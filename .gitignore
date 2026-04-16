@@ -1,0 +1,14 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Plotter outputs / artifacts
+output/
+plots/
+plotter.log
+test_images/
+
+# Local config generations
+Configurations/**/__pycache__/
+Configurations/**/files_old.json

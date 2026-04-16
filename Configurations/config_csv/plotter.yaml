@@ -1,0 +1,15 @@
+selection: {}
+
+plotting:
+  # Columns come directly from data/Higgs.csv and data/Z0.csv
+  control:
+    - H.m
+    - H.pt
+    - METx
+    - METy
+    - trueMETx
+    - trueMETy
+  # Enable resolution plots for trueMET vs MET
+  resolution:
+    - METx
+    - METy
