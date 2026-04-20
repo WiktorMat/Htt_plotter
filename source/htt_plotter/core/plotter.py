@@ -4,7 +4,8 @@ import logging
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from htt_plotter.backgrounds.qcd import add_qcd_from_ss
 from htt_plotter.config.loader import load_configs
@@ -17,6 +18,7 @@ from htt_plotter.plotting.pairs import make_resolution_pairs
 from htt_plotter.plotting.render import save_data_mc_ratio_plot, save_stacked_plot
 from htt_plotter.selection.selection import make_arrow_filter, selection_columns_used
 from htt_plotter.utils.fs import ensure_dir
+
 
 
 class Plotter:
@@ -112,34 +114,47 @@ class Plotter:
         col = batch.column(batch.schema.get_field_index(name))
         return col.to_numpy(zero_copy_only=False)
     
-    def _save_histograms_parquet(self, histograms: dict[str, np.ndarray], edges: np.ndarray, out_path: str, plot_type: str, variable: str, ) -> None:
-        rows = []
+    from pathlib import Path
 
-        bin_left = edges[:-1]
-        bin_right = edges[1:]
-        bin_center = 0.5 * (bin_left + bin_right)
 
-        for sample, counts in histograms.items():
-            for i in range(len(counts)):
-                rows.append(
-                    {
-                        "plot_type": plot_type,
-                        "variable": variable,
-                        "sample": sample,
-                        "bin_left": float(bin_left[i]),
-                        "bin_right": float(bin_right[i]),
-                        "bin_center": float(bin_center[i]),
-                        "count": float(counts[i]),
-                    }
-                )
-
-        if not rows:
+    def _save_histograms_parquet(self, histograms: dict[str, np.ndarray], edges: np.ndarray, out_path: str, plot_type: str, variable: str,) -> None:
+        if not histograms:
             return
 
-        df = pd.DataFrame(rows)
+        samples = []
+        plot_types = []
+        variables = []
+        counts_data = []
+        edges_data = []
+
+        edges_list = edges.astype(float).tolist()
+
+        for sample, counts in histograms.items():
+            samples.append(sample)
+            plot_types.append(plot_type)
+            variables.append(variable)
+            counts_data.append(counts.astype(float).tolist())
+            edges_data.append(edges_list)
+
+        table = pa.Table.from_arrays(
+            [
+                pa.array(plot_types, type=pa.string()),
+                pa.array(variables, type=pa.string()),
+                pa.array(samples, type=pa.string()),
+                pa.array(counts_data, type=pa.list_(pa.float64())),
+                pa.array(edges_data, type=pa.list_(pa.float64())),
+            ],
+            names=[
+                "plot_type",
+                "variable",
+                "sample",
+                "counts",
+                "bin_edges",
+            ],
+        )
 
         parquet_path = Path(out_path).with_suffix(".parquet")
-        df.to_parquet(parquet_path, index=False)
+        pq.write_table(table, parquet_path, compression="zstd")
 
         self.logger.info("Saved histogram parquet: %s", parquet_path)
     
