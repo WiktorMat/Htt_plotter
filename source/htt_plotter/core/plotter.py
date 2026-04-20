@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from htt_plotter.backgrounds.qcd import add_qcd_from_ss
 from htt_plotter.config.loader import load_configs
@@ -110,6 +111,38 @@ class Plotter:
         # Assumes numeric columns; works well for typical parquet physics tables.
         col = batch.column(batch.schema.get_field_index(name))
         return col.to_numpy(zero_copy_only=False)
+    
+    def _save_histograms_parquet(self, histograms: dict[str, np.ndarray], edges: np.ndarray, out_path: str, plot_type: str, variable: str, ) -> None:
+        rows = []
+
+        bin_left = edges[:-1]
+        bin_right = edges[1:]
+        bin_center = 0.5 * (bin_left + bin_right)
+
+        for sample, counts in histograms.items():
+            for i in range(len(counts)):
+                rows.append(
+                    {
+                        "plot_type": plot_type,
+                        "variable": variable,
+                        "sample": sample,
+                        "bin_left": float(bin_left[i]),
+                        "bin_right": float(bin_right[i]),
+                        "bin_center": float(bin_center[i]),
+                        "count": float(counts[i]),
+                    }
+                )
+
+        if not rows:
+            return
+
+        df = pd.DataFrame(rows)
+
+        parquet_path = Path(out_path).with_suffix(".parquet")
+        df.to_parquet(parquet_path, index=False)
+
+        self.logger.info("Saved histogram parquet: %s", parquet_path)
+    
 
     def run_all(self, *, do_control: bool = True, do_resolution: bool = True, do_mc_data: bool = True) -> None:
         """Fill and render all plots in a single pass over input data."""
@@ -215,6 +248,10 @@ class Plotter:
                 params_key = (self.sample_config.get(sample) or {}).get("params_key", sample)
                 mc_weight = compute_mc_weight(params_key, self.params, cache=self._mc_weight_cache)
 
+            print("BEFORE:", columns)
+            columns = [c for c in columns if c in item["schema"]]
+            print("AFTER:", columns)
+
             for batch in self.data_access.iter_batches(item, columns=columns, filter_expr=filter_expr):
                 # Control plots
                 if do_control and present_control:
@@ -286,6 +323,15 @@ class Plotter:
                     out_path=out_path,
                     get_color=self.get_sample_color,
                 )
+
+                self._save_histograms_parquet(
+                    histograms=hist,
+                    edges=control_edges[var],
+                    out_path=out_path,
+                    plot_type="control",
+                    variable=var,
+                )
+
                 self.logger.info("Saved control plot: %s", out_path)
 
         # Render resolution
@@ -301,6 +347,13 @@ class Plotter:
                     xlabel=f"res_{r}",
                     out_path=out_path,
                     get_color=self.get_sample_color,
+                )
+                self._save_histograms_parquet(
+                    histograms=hist,
+                    edges=resolution_edges[(c, r)],
+                    out_path=out_path,
+                    plot_type="resolution",
+                    variable=f"{r}_from_{c}",
                 )
                 self.logger.info("Saved resolution plot: %s", out_path)
 
@@ -342,6 +395,16 @@ class Plotter:
                     xlabel=var,
                     get_color=self.get_sample_color,
                 )
+                combined = {"data": data_counts, **mc_samples}
+
+                self._save_histograms_parquet(
+                    histograms=combined,
+                    edges=control_edges[var],
+                    out_path=out_path,
+                    plot_type="mc_data",
+                    variable=var,
+                )
+
                 self.logger.info("Saved MC/Data plot: %s", out_path)
 
     # Backward-compatible convenience methods
