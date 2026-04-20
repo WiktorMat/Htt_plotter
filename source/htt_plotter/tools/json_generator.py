@@ -30,13 +30,35 @@ def get_color(i: int) -> str:
     return COLOR_PALETTE[i % len(COLOR_PALETTE)]
 
 
-def _rel(p: Path) -> str:
-    return p.relative_to(PROJECT_ROOT).as_posix()
+def _anchor_to_project_root(p: Path) -> Path:
+    """Return an absolute path.
+
+    If `p` is relative, interpret it relative to PROJECT_ROOT (not CWD).
+    This makes CLI usage consistent no matter where the module is executed from.
+    """
+
+    if p.is_absolute():
+        return p
+    return (PROJECT_ROOT / p)
+
+
+def _rel_or_abs(p: Path) -> str:
+    """Prefer storing paths relative to PROJECT_ROOT.
+
+    If the file is outside the project tree (e.g. EOS mount), fall back to an
+    absolute path so generator doesn't crash.
+    """
+
+    try:
+        return p.relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        return p.as_posix()
 
 
 def scan_mc_samples(base_dir: Path, year: str = YEAR, channel: str = CHANNEL) -> dict:
     """Scan MC folders and return samples with explicit file lists."""
 
+    base_dir = _anchor_to_project_root(base_dir)
     base_path = base_dir / year / channel
 
     print(f"Scanning MC base: {base_path}")
@@ -51,7 +73,9 @@ def scan_mc_samples(base_dir: Path, year: str = YEAR, channel: str = CHANNEL) ->
     for process_dir in sorted([p for p in base_path.iterdir() if p.is_dir()]):
         sample_name = process_dir.name
 
-        files = sorted({p.resolve() for p in process_dir.rglob("*.parquet") if p.is_file()})
+        # Do NOT call resolve() here: it would dereference symlinks and can
+        # turn project-relative paths into external EOS absolute paths.
+        files = sorted({p for p in process_dir.rglob("*.parquet") if p.is_file()})
         if not files:
             continue
 
@@ -61,7 +85,7 @@ def scan_mc_samples(base_dir: Path, year: str = YEAR, channel: str = CHANNEL) ->
             "kind": "mc",
             "scale": 1.0,
             "color": get_color(idx),
-            "files": [_rel(p) for p in files],
+            "files": [_rel_or_abs(p) for p in files],
         }
 
         idx += 1
@@ -70,9 +94,10 @@ def scan_mc_samples(base_dir: Path, year: str = YEAR, channel: str = CHANNEL) ->
 
 
 def add_data(samples: dict, data_dir: Path) -> dict:
+    data_dir = _anchor_to_project_root(data_dir)
     print(f"Scanning Data dir: {data_dir}")
 
-    files = sorted({p.resolve() for p in data_dir.rglob("*.parquet") if p.is_file()})
+    files = sorted({p for p in data_dir.rglob("*.parquet") if p.is_file()})
     if not files:
         print("No data parquet files found")
         return samples
@@ -82,7 +107,7 @@ def add_data(samples: dict, data_dir: Path) -> dict:
     samples["Data"] = {
         "kind": "data",
         "color": "black",
-        "files": [_rel(p) for p in files],
+        "files": [_rel_or_abs(p) for p in files],
     }
 
     return samples
