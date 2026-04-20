@@ -94,7 +94,10 @@ class DataAccess:
 
         index: list[dict] = []
 
-        for sample_name, cfg in (self.sample_config or {}).items():
+        sample_config = self.sample_config.get("samples", self.sample_config)
+        process_config = self.sample_config.get("process", {})
+
+        for sample_name, cfg in sample_config.items():
             kind = cfg.get("kind", "mc")
             scale = cfg.get("scale", 1.0)
             color = cfg.get("color", None)

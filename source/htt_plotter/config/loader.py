@@ -63,7 +63,14 @@ def load_configs(project_root: Path, config_name: str = "config_0"):
         )
 
     with open(files_path, "r", encoding="utf-8") as f:
-        sample_config = json.load(f)
+        raw = json.load(f)
+
+    if "samples" in raw:
+        sample_config = raw["samples"]
+    else:
+        sample_config = raw
+
+    process_config = raw.get("process", {})
 
     with open(params_path, "r", encoding="utf-8") as f:
         params = yaml.safe_load(f) or {}
@@ -80,4 +87,4 @@ def load_configs(project_root: Path, config_name: str = "config_0"):
     plotter_config["plotting"].setdefault("control", [])
     plotter_config["plotting"].setdefault("resolution", [])
 
-    return sample_config, params, variable_config, plotter_config
+    return sample_config, params, variable_config, plotter_config, process_config

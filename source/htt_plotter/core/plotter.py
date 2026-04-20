@@ -63,6 +63,7 @@ class Plotter:
             self.params,
             self.variable_config,
             self.plotter_config,
+            self.process_config,
         ) = load_configs(self.project_root, self.config_name)
 
         self.data_access = DataAccess(
