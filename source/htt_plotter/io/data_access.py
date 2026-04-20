@@ -34,7 +34,7 @@ class DataAccess:
             p = Path(f)
             if not p.is_absolute():
                 p = self.project_root / p
-            p = p.resolve()
+            p = p.absolute()
             files.append(p)
         return files
 

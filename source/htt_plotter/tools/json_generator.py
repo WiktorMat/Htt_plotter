@@ -9,7 +9,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 OUTPUT_ROOT = PROJECT_ROOT / "output"
 MC_BASE_DEFAULT = OUTPUT_ROOT / "test_plotter"
-DATA_DIR_DEFAULT = OUTPUT_ROOT / "Muon1"
 
 YEAR = "Run3_2024"
 CHANNEL = "mt"
@@ -30,13 +29,53 @@ def get_color(i: int) -> str:
     return COLOR_PALETTE[i % len(COLOR_PALETTE)]
 
 
-def _rel(p: Path) -> str:
-    return p.relative_to(PROJECT_ROOT).as_posix()
+def _anchor_to_project_root(p: Path) -> Path:
+    """Return an absolute path.
+
+    If `p` is relative, interpret it relative to PROJECT_ROOT (not CWD).
+    This makes CLI usage consistent no matter where the module is executed from.
+    """
+
+    if p.is_absolute():
+        return p
+    return (PROJECT_ROOT / p)
 
 
-def scan_mc_samples(base_dir: Path, year: str = YEAR, channel: str = CHANNEL) -> dict:
+def _format_path(p: Path, *, path_mode: str) -> str:
+    """Format a file path for files.json.
+
+    path_mode:
+      - 'relative': require paths relative to PROJECT_ROOT (errors otherwise)
+      - 'absolute': always write absolute paths
+      - 'auto': relative when possible, else absolute
+    """
+
+    if path_mode not in {"relative", "absolute", "auto"}:
+        raise ValueError(f"Unsupported path_mode: {path_mode}")
+
+    if path_mode == "absolute":
+        return p.as_posix()
+
+    try:
+        rel = p.relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        if path_mode == "relative":
+            raise
+        return p.as_posix()
+    else:
+        return rel
+
+
+def scan_mc_samples(
+    base_dir: Path,
+    *,
+    year: str = YEAR,
+    channel: str = CHANNEL,
+    path_mode: str = "auto",
+) -> dict:
     """Scan MC folders and return samples with explicit file lists."""
 
+    base_dir = _anchor_to_project_root(base_dir)
     base_path = base_dir / year / channel
 
     print(f"Scanning MC base: {base_path}")
@@ -51,7 +90,9 @@ def scan_mc_samples(base_dir: Path, year: str = YEAR, channel: str = CHANNEL) ->
     for process_dir in sorted([p for p in base_path.iterdir() if p.is_dir()]):
         sample_name = process_dir.name
 
-        files = sorted({p.resolve() for p in process_dir.rglob("*.parquet") if p.is_file()})
+        # Do NOT call resolve() here: it would dereference symlinks and can
+        # turn project-relative paths into external EOS absolute paths.
+        files = sorted({p for p in process_dir.rglob("*.parquet") if p.is_file()})
         if not files:
             continue
 
@@ -61,29 +102,10 @@ def scan_mc_samples(base_dir: Path, year: str = YEAR, channel: str = CHANNEL) ->
             "kind": "mc",
             "scale": 1.0,
             "color": get_color(idx),
-            "files": [_rel(p) for p in files],
+            "files": [_format_path(p, path_mode=path_mode) for p in files],
         }
 
         idx += 1
-
-    return samples
-
-
-def add_data(samples: dict, data_dir: Path) -> dict:
-    print(f"Scanning Data dir: {data_dir}")
-
-    files = sorted({p.resolve() for p in data_dir.rglob("*.parquet") if p.is_file()})
-    if not files:
-        print("No data parquet files found")
-        return samples
-
-    print(f"  Data: files: {len(files)}")
-
-    samples["Data"] = {
-        "kind": "data",
-        "color": "black",
-        "files": [_rel(p) for p in files],
-    }
 
     return samples
 
@@ -112,14 +134,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Base folder containing MC samples (default: output/test_plotter)",
     )
     parser.add_argument(
-        "--data-dir",
-        default=str(DATA_DIR_DEFAULT),
-        help="Folder containing data parquet files (default: output/Muon1)",
+        "--path-mode",
+        choices=["auto", "relative", "absolute"],
+        default="auto",
+        help="How to store file paths inside files.json",
     )
     args = parser.parse_args(argv)
 
-    samples = scan_mc_samples(Path(args.mc_base), year=args.year, channel=args.channel)
-    samples = add_data(samples, Path(args.data_dir))
+    mc_base = _anchor_to_project_root(Path(args.mc_base))
+
+    samples = scan_mc_samples(
+        mc_base,
+        year=args.year,
+        channel=args.channel,
+        path_mode=args.path_mode,
+    )
 
     out_path = PROJECT_ROOT / "Configurations" / args.config_name / "files.json"
     write_files_json(samples, out_path)
