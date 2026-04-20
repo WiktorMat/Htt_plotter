@@ -18,7 +18,7 @@ if __name__ == "__main__":
         ],
     )
 
-    config_name = "config_0"
+    config_name = "config_csv"
 
     config_dir = project_root / "Configurations" / config_name
 
@@ -38,10 +38,11 @@ if __name__ == "__main__":
         )
 
     plotter = Plotter(
-        100,
-        50,
-        20,
-        1,
+        xlim_contrl=100,
+        xlim_resolution=50,
+        bins=20,
+        alpha=0.4,
+        layout="stacked",
         config_name=config_name,
     )
 

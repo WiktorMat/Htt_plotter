@@ -6,38 +6,82 @@ import matplotlib.gridspec as gridspec
 
 
 def save_stacked_plot(
-    hist_dict: dict[str, np.ndarray],
-    edges: np.ndarray,
-    *,
-    title: str,
-    xlabel: str,
-    out_path: str,
+    histograms,
+    edges,
+    title,
+    xlabel,
+    out_path,
     get_color,
-    figsize=(8, 6),
-) -> None:
-    bottom = np.zeros(len(edges) - 1)
+    alpha=1.0,
+    layout="stacked",
+):
+    labels = list(histograms.keys())
+    values = [histograms[k] for k in labels]
+    colors = [get_color(k) for k in labels]
 
-    plt.figure(figsize=figsize)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    width = np.diff(edges)
 
-    for sample, counts in hist_dict.items():
-        plt.bar(
-            edges[:-1],
-            counts,
-            width=np.diff(edges),
-            bottom=bottom,
-            align="edge",
-            label=sample,
-            color=get_color(sample),
-            edgecolor="black",
-        )
-        bottom += counts
+    fig, ax = plt.subplots(figsize=(8,6))
 
-    plt.title(title)
-    plt.xlabel(xlabel)
-    plt.ylabel("Events")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    if layout == "stacked":
+        bottom = np.zeros(len(edges)-1)
+        for label, counts, color in zip(labels, values, colors):
+            ax.bar(
+                centers,
+                counts,
+                width=width,
+                bottom=bottom,
+                color=color,
+                label=label,
+                alpha=alpha,
+                edgecolor="black",
+                linewidth=0.8,
+                align="center",
+            )
+            bottom += counts
+
+    elif layout == "overlay":
+        for label, counts, color in zip(labels, values, colors):
+            ax.bar(
+                centers,
+                counts,
+                width=width,
+                color=color,
+                label=label,
+                alpha=min(alpha, 0.5),
+                edgecolor="black",
+                linewidth=0.8,
+                align="center",
+            )
+
+    elif layout == "side_by_side":
+        n = len(values)
+        single_width = width / n
+
+        for i, (label, counts, color) in enumerate(zip(labels, values, colors)):
+            shifted = centers - width/2 + i*single_width + single_width/2
+            ax.bar(
+                shifted,
+                counts,
+                width=single_width,
+                color=color,
+                label=label,
+                alpha=alpha,
+                edgecolor="black",
+                linewidth=0.8,
+                align="center",
+            )
+
+    else:
+        raise ValueError(f"Unknown layout: {layout}")
+
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Entries")
+    ax.legend()
+    plt.tight_layout()
+    plt.savefig(out_path)
     plt.close()
 
 
@@ -79,6 +123,8 @@ def save_data_mc_ratio_plot(
             align="edge",
             color=color,
             label=label,
+            edgecolor="black",
+            linewidth=0.8,
         )
 
         bottom += vals

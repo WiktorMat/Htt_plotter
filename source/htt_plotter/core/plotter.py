@@ -37,12 +37,14 @@ class Plotter:
         xlim_resolution: float | None = None,
         bins: int = 20,
         alpha: float = 1,
+        layout: str = "stacked",
         config_name: str = "config_0",
     ):
         self.xlim_ctrl = xlim_contrl or 100
         self.xlim_resol = xlim_resolution or 50
         self.bins = bins
         self.alpha = alpha
+        self.layout = layout
 
         self.project_root = Path(__file__).resolve().parents[3]
 
@@ -337,6 +339,7 @@ class Plotter:
                     xlabel=var,
                     out_path=out_path,
                     get_color=self.get_sample_color,
+                    layout=self.layout,
                 )
 
                 self._save_histograms_parquet(
@@ -362,6 +365,7 @@ class Plotter:
                     xlabel=f"res_{r}",
                     out_path=out_path,
                     get_color=self.get_sample_color,
+                    layout=self.layout,
                 )
                 self._save_histograms_parquet(
                     histograms=hist,
@@ -421,6 +425,7 @@ class Plotter:
                 )
 
                 self.logger.info("Saved MC/Data plot: %s", out_path)
+
 
     # Backward-compatible convenience methods
     def control_plot(self) -> None:

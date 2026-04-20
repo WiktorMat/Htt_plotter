@@ -3,6 +3,7 @@
     "kind": "mc",
     "scale": 1.0,
     "color": "tab:blue",
+    "process": "Higgs",
     "files": [
       "data/Higgs.csv"
     ]
@@ -11,6 +12,7 @@
     "kind": "mc",
     "scale": 1.0,
     "color": "tab:orange",
+    "process": "Ztautau",
     "files": [
       "data/Z0.csv"
     ]
