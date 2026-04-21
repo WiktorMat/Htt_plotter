@@ -56,22 +56,40 @@ def save_stacked_plot(
             )
 
     elif layout == "side_by_side":
-        n = len(values)
-        single_width = width / n
+        labels = list(histograms.keys())
+        values = [histograms[k] for k in labels]
+        colors = [get_color(k) for k in labels]
+
+        n = len(labels)
+
+        fig = plt.figure(figsize=(5 * n, 5))
+        gs = gridspec.GridSpec(1, n, wspace=0.25)
 
         for i, (label, counts, color) in enumerate(zip(labels, values, colors)):
-            shifted = centers - width/2 + i*single_width + single_width/2
+            ax = fig.add_subplot(gs[0, i])
+
+            centers = 0.5 * (edges[:-1] + edges[1:])
+            width = np.diff(edges)
+
             ax.bar(
-                shifted,
+                centers,
                 counts,
-                width=single_width,
+                width=width,
                 color=color,
-                label=label,
-                alpha=alpha,
                 edgecolor="black",
                 linewidth=0.8,
-                align="center",
+                alpha=alpha,
             )
+
+            ax.set_title(label)
+            ax.set_xlabel(xlabel)
+            if i == 0:
+                ax.set_ylabel("Entries")
+            else:
+                ax.set_ylabel("")
+
+        fig.suptitle(title)
+        plt.tight_layout()
 
     else:
         raise ValueError(f"Unknown layout: {layout}")
