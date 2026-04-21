@@ -11,5 +11,13 @@ plotting:
     - trueMETy
   # Enable resolution plots for trueMET vs MET
   resolution:
-    - METx
-    - METy
+  - [trueMETx, METx]
+  - [trueMETy, METy]
+
+  plotter_runtime:
+    xlim_control: 100
+    xlim_resolution: 50
+    bins: 20
+    alpha: 0.4
+    layout: stacked
+    mode: raw

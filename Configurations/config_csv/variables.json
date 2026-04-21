@@ -4,5 +4,9 @@
   "METx": {"x_min": -200, "x_max": 200, "bin_width": 5},
   "METy": {"x_min": -200, "x_max": 200, "bin_width": 5},
   "trueMETx": {"x_min": -200, "x_max": 200, "bin_width": 5},
-  "trueMETy": {"x_min": -200, "x_max": 200, "bin_width": 5}
+  "trueMETy": {"x_min": -200, "x_max": 200, "bin_width": 5},
+
+  "phi": {"type": "angle", "relative_resolution": false},
+  "eta": {"type": "angle"," relative_resolution": false},
+  "pt": {"type": "physics", "relative_resolution": true}
 }

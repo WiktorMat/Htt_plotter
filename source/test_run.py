@@ -38,13 +38,7 @@ if __name__ == "__main__":
         )
 
     plotter = Plotter(
-        xlim_contrl=100,
-        xlim_resolution=50,
-        bins=20,
-        alpha=0.4,
-        layout="stacked",
         config_name=config_name,
-        mode="raw",
     )
 
     plotter.run_all()

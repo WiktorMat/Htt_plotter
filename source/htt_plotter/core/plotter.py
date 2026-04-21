@@ -31,26 +31,11 @@ class Plotter:
     - can fill all histograms in a single pass over the data
     """
 
-    def __init__(
-        self,
-        xlim_contrl: float | None = None,
-        xlim_resolution: float | None = None,
-        bins: int = 20,
-        alpha: float = 1,
-        layout: str = "stacked",
-        config_name: str = "config_0",
-        mode: str = "raw",
-    ):
-        self.xlim_ctrl = xlim_contrl or 100
-        self.xlim_resol = xlim_resolution or 50
-        self.bins = bins
-        self.alpha = alpha
-        self.layout = layout
-        self.mode = mode
-
+    def __init__(self, config_name: str = "config_0"):
+        self.config_name = config_name
         self.project_root = Path(__file__).resolve().parents[3]
 
-        self.index: list[dict] = []  # per-sample index
+        self.index: list[dict] = []
 
         self._bin_cache: dict = {}
         self._mc_weight_cache: dict = {}
@@ -59,7 +44,6 @@ class Plotter:
         self.recon_name: list[str] = []
         self.resolution_pairs: list[tuple[str, str]] = []
 
-        self.config_name = config_name
         (
             self.sample_config,
             self.params,
@@ -67,6 +51,15 @@ class Plotter:
             self.plotter_config,
             self.process_config,
         ) = load_configs(self.project_root, self.config_name)
+
+        runtime = self.plotter_config.get("plotter_runtime") or {}
+
+        self.xlim_ctrl = runtime.get("xlim_control", 100)
+        self.xlim_resol = runtime.get("xlim_resolution", 50)
+        self.bins = runtime.get("bins", 20)
+        self.alpha = runtime.get("alpha", 1.0)
+        self.layout = runtime.get("layout", "stacked")
+        self.mode = runtime.get("mode", "raw")
 
         self.data_access = DataAccess(
             self.project_root,
@@ -85,7 +78,6 @@ class Plotter:
         self.logger.info("Indexed samples: %d | total files: %d", len(self.index), n_files)
 
     def set_parameters(self) -> None:
-        # Start from config-defined variable groups, then restrict to what exists.
         desired_control = (self.plotter_config.get("plotting") or {}).get("control", [])
         desired_resolution = (self.plotter_config.get("plotting") or {}).get("resolution", [])
 
@@ -94,10 +86,29 @@ class Plotter:
             available_cols |= set(item.get("schema", set()))
 
         self.contr_name = [v for v in desired_control if v in available_cols]
-        self.recon_name = [v for v in desired_resolution if v in available_cols]
+
+        self.resolution_pairs = []
+
+        for item in desired_resolution:
+
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                c, r = item
+                if c in available_cols and r in available_cols:
+                    self.resolution_pairs.append((c, r))
+
+            elif isinstance(item, str):
+                self.logger.warning(
+                    "Resolution item '%s' is a string, expected [c,r] pair. Ignored.",
+                    item
+                )
+
+            else:
+                raise ValueError(
+                    f"Invalid resolution format: {item}. Expected [var1, var2]."
+                )
 
         self.logger.info("Control vars: %s", self.contr_name)
-        self.logger.info("Resolution vars: %s", self.recon_name)
+        self.logger.info("Resolution pairs: %s", self.resolution_pairs)
 
     def batch(self) -> None:
         self.resolution_pairs = make_resolution_pairs(self.contr_name, self.recon_name)
@@ -410,7 +421,17 @@ class Plotter:
                             if not np.any(mask):
                                 continue
 
-                            resolution = (rv[mask] - cv[mask]) / cv[mask]
+                            var_cfg = self.variable_config.get(r, {})
+
+                            is_angle = var_cfg.get("type") == "angle"
+                            relative = var_cfg.get("relative_resolution", True)
+
+                            if is_angle or not relative:
+                                resolution = rv[mask] - cv[mask]
+
+                                resolution = (resolution + np.pi) % (2 * np.pi) - np.pi
+                            else:
+                                resolution = (rv[mask] - cv[mask]) / cv[mask]
                             edges = resolution_edges[(c, r)]
                             counts, _ = np.histogram(resolution, bins=edges)
                             counts = counts * scale
