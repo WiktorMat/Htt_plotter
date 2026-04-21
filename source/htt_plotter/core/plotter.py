@@ -4,16 +4,14 @@ import logging
 from pathlib import Path
 
 import numpy as np
-import pyarrow as pa
-import pyarrow.parquet as pq
 
 from htt_plotter.backgrounds.qcd import add_qcd_from_ss
 from htt_plotter.config.loader import load_configs
 from htt_plotter.io.data_access import DataAccess
+from htt_plotter.io.hist_parquet import read_histograms_parquet, write_histograms_parquet
 from htt_plotter.physics.weights import compute_mc_weight
 from htt_plotter.plotting.accumulate import add_histogram
 from htt_plotter.plotting.binning import get_binning
-from htt_plotter.plotting.colors import get_sample_color
 from htt_plotter.plotting.pairs import make_resolution_pairs
 from htt_plotter.plotting.render import save_data_mc_ratio_plot, save_stacked_plot
 from htt_plotter.selection.selection import make_arrow_filter, selection_columns_used
@@ -61,13 +59,13 @@ class Plotter:
             self.plotter_config,
             self.process_config,
         ) = load_configs(self.project_root, self.config_name)
-        
-        self.process_config = self.process_config
+
+        self.logger = logging.getLogger(__name__)
 
         self.sample_to_process = self._build_sample_to_process_map()
         self.process_colors = self._build_process_colors()
-        print("PROCESS COLORS:", self.process_colors)
-        print("SAMPLE MAP:", self.sample_to_process)
+        self.logger.debug("Process colors: %s", self.process_colors)
+        self.logger.debug("Sample→process map: %s", self.sample_to_process)
 
         runtime = dict(self.plotter_config.get("plotter_runtime") or {})
 
@@ -96,8 +94,6 @@ class Plotter:
             self.sample_config,
             log_every_files=200,
         )
-
-        self.logger = logging.getLogger(__name__)
 
     def _build_sample_to_process_map(self) -> dict[str, str]:
         mapping: dict[str, str] = {}
@@ -192,49 +188,6 @@ class Plotter:
         col = batch.column(batch.schema.get_field_index(name))
         return col.to_numpy(zero_copy_only=False)
     
-
-
-    def _save_histograms_parquet(self, histograms: dict[str, np.ndarray], edges: np.ndarray, out_path: str, plot_type: str, variable: str,) -> None:
-        if not histograms:
-            return
-
-        samples = []
-        plot_types = []
-        variables = []
-        counts_data = []
-        edges_data = []
-
-        edges_list = edges.astype(float).tolist()
-
-        for sample, counts in histograms.items():
-            samples.append(sample)
-            plot_types.append(plot_type)
-            variables.append(variable)
-            counts_data.append(counts.astype(float).tolist())
-            edges_data.append(edges_list)
-
-        table = pa.Table.from_arrays(
-            [
-                pa.array(plot_types, type=pa.string()),
-                pa.array(variables, type=pa.string()),
-                pa.array(samples, type=pa.string()),
-                pa.array(counts_data, type=pa.list_(pa.float64())),
-                pa.array(edges_data, type=pa.list_(pa.float64())),
-            ],
-            names=[
-                "plot_type",
-                "variable",
-                "sample",
-                "counts",
-                "bin_edges",
-            ],
-        )
-
-        parquet_path = Path(out_path).with_suffix(".parquet")
-        pq.write_table(table, parquet_path, compression="zstd")
-
-        self.logger.info("Saved histogram parquet: %s", parquet_path)
-
     def run_from_histograms(self, *, do_control=True, do_resolution=True, do_mc_data=True): 
         self.logger.info("Running in HIST mode")
 
@@ -242,18 +195,11 @@ class Plotter:
             folder = Path("plots/control_plots")
 
             for file in folder.glob("*.parquet"):
-                table = pq.read_table(file)
-                df = table.to_pandas()
-
-                if df.empty:
+                parsed = read_histograms_parquet(file)
+                if parsed is None:
                     continue
 
-                variable = df["variable"].iloc[0]
-                edges = np.array(df["bin_edges"].iloc[0], dtype=float)
-
-                hist = {}
-                for _, row in df.iterrows():
-                    hist[row["sample"]] = np.array(row["counts"], dtype=float)
+                _, variable, edges, hist = parsed
 
                 out_path = folder / f"{variable}.png"
 
@@ -273,18 +219,11 @@ class Plotter:
             folder = Path("plots/resolution_plots")
 
             for file in folder.glob("*.parquet"):
-                table = pq.read_table(file)
-                df = table.to_pandas()
-
-                if df.empty:
+                parsed = read_histograms_parquet(file)
+                if parsed is None:
                     continue
 
-                variable = df["variable"].iloc[0]
-                edges = np.array(df["bin_edges"].iloc[0], dtype=float)
-
-                hist = {}
-                for _, row in df.iterrows():
-                    hist[row["sample"]] = np.array(row["counts"], dtype=float)
+                _, variable, edges, hist = parsed
 
                 out_path = folder / f"{file.stem}.png"
 
@@ -304,22 +243,16 @@ class Plotter:
             folder = Path("plots/mc_data_plots")
 
             for file in folder.glob("*.parquet"):
-                table = pq.read_table(file)
-                df = table.to_pandas()
-
-                if df.empty:
+                parsed = read_histograms_parquet(file)
+                if parsed is None:
                     continue
 
-                variable = df["variable"].iloc[0]
-                edges = np.array(df["bin_edges"].iloc[0], dtype=float)
+                _, variable, edges, hist = parsed
 
                 data_counts = None
-                mc_samples = {}
+                mc_samples: dict[str, np.ndarray] = {}
 
-                for _, row in df.iterrows():
-                    sample = row["sample"]
-                    counts = np.array(row["counts"], dtype=float)
-
+                for sample, counts in hist.items():
                     if sample.lower() == "data":
                         data_counts = counts
                     else:
@@ -516,9 +449,10 @@ class Plotter:
                                     continue
 
                                 edges = control_edges[var]
-                                counts, _ = np.histogram(values[mask], bins=edges)
-                                counts = counts * mc_weight
-                                sumw2 = counts * (mc_weight**2)
+                                raw_counts, _ = np.histogram(values[mask], bins=edges)
+                                raw_counts = raw_counts.astype(float)
+                                counts = raw_counts * mc_weight
+                                sumw2 = raw_counts * (mc_weight**2)
 
                                 process = self._sample_to_process(sample)
 
@@ -552,7 +486,7 @@ class Plotter:
                         layout=self.layout,
                     )
 
-                    self._save_histograms_parquet(
+                    parquet_path = write_histograms_parquet(
                         histograms=hist,
                         edges=control_edges[var],
                         out_path=out_path,
@@ -560,7 +494,7 @@ class Plotter:
                         variable=var,
                     )
 
-                    self.logger.info("Saved control plot: %s", out_path)
+                    self.logger.info("Saved control plot: %s (parquet: %s)", out_path, parquet_path)
 
             # Render resolution
             if do_resolution:
@@ -577,20 +511,44 @@ class Plotter:
                         get_color=self._get_process_color,
                         layout=self.layout,
                     )
-                    self._save_histograms_parquet(
+                    parquet_path = write_histograms_parquet(
                         histograms=hist,
                         edges=resolution_edges[(c, r)],
                         out_path=out_path,
                         plot_type="resolution",
                         variable=f"{r}_from_{c}",
                     )
-                    self.logger.info("Saved resolution plot: %s", out_path)
+                    self.logger.info("Saved resolution plot: %s (parquet: %s)", out_path, parquet_path)
 
             # Render agreement
             if do_mc_data:
                 for var, regions in agreement.items():
                     # add QCD per-var
                     histograms = {"OS": regions["OS"], "SS": regions["SS"]}
+
+                    def _sum_counts(region_dict: dict[str, dict[str, np.ndarray]], *, want_kind: str) -> float:
+                        total = 0.0
+                        for proc_name, h in (region_dict or {}).items():
+                            if process_kinds.get(proc_name, "mc") != want_kind:
+                                continue
+                            total += float(np.sum(h.get("counts", 0.0)))
+                        return total
+
+                    data_os = _sum_counts(histograms["OS"], want_kind="data")
+                    data_ss = _sum_counts(histograms["SS"], want_kind="data")
+                    mc_os = _sum_counts(histograms["OS"], want_kind="mc")
+                    mc_ss = _sum_counts(histograms["SS"], want_kind="mc")
+
+                    if data_os > 0:
+                        self.logger.info(
+                            "MC/Data totals (%s): data(OS=%.3g,SS=%.3g) mc(OS=%.3g,SS=%.3g) mc/data(OS)=%.3g",
+                            var,
+                            data_os,
+                            data_ss,
+                            mc_os,
+                            mc_ss,
+                            mc_os / data_os,
+                        )
 
                     add_qcd_from_ss(
                         histograms,
@@ -601,32 +559,53 @@ class Plotter:
                     samples = histograms["OS"]
 
                     data_counts = None
+                    data_sumw2 = None
                     mc_samples: dict[str, np.ndarray] = {}
+                    mc_sumw2_total = None
 
                     for name, hist in samples.items():
                         if process_kinds.get(name, "mc") == "data":
                             if data_counts is None:
                                 data_counts = hist["counts"].copy()
+                                data_sumw2 = hist.get("sumw2", hist["counts"]).copy()
                             else:
                                 data_counts += hist["counts"]
+                                data_sumw2 += hist.get("sumw2", hist["counts"])
                         else:
                             mc_samples[name] = hist["counts"].copy()
+                            sumw2 = hist.get("sumw2")
+                            if sumw2 is None:
+                                continue
+                            if mc_sumw2_total is None:
+                                mc_sumw2_total = sumw2.copy()
+                            else:
+                                mc_sumw2_total += sumw2
 
                     if data_counts is None or not mc_samples:
                         continue
+
+                    data_unc = None
+                    if data_sumw2 is not None:
+                        data_unc = np.sqrt(np.maximum(data_sumw2, 0.0))
+
+                    mc_total_unc = None
+                    if mc_sumw2_total is not None:
+                        mc_total_unc = np.sqrt(np.maximum(mc_sumw2_total, 0.0))
 
                     out_path = f"plots/mc_data_plots/MC_vs_Data_{var}.png"
                     save_data_mc_ratio_plot(
                         bin_edges=control_edges[var],
                         data_counts=data_counts,
                         mc_samples=mc_samples,
+                        data_unc=data_unc,
+                        mc_total_unc=mc_total_unc,
                         out_path=out_path,
                         xlabel=var,
                         get_color=self._get_process_color,
                     )
                     combined = {"data": data_counts, **mc_samples}
 
-                    self._save_histograms_parquet(
+                    parquet_path = write_histograms_parquet(
                         histograms=combined,
                         edges=control_edges[var],
                         out_path=out_path,
@@ -634,17 +613,6 @@ class Plotter:
                         variable=var,
                     )
 
-                    self.logger.info("Saved MC/Data plot: %s", out_path)
+                    self.logger.info("Saved MC/Data plot: %s (parquet: %s)", out_path, parquet_path)
         else:
             self.logger.warning("There is no mode like that!")
-
-
-    # Backward-compatible convenience methods
-    def control_plot(self) -> None:
-        self.run_all(do_control=True, do_resolution=False, do_mc_data=False)
-
-    def resolution_plot(self) -> None:
-        self.run_all(do_control=False, do_resolution=True, do_mc_data=False)
-
-    def Plot_MC_Data_Agrement(self) -> None:
-        self.run_all(do_control=False, do_resolution=False, do_mc_data=True)

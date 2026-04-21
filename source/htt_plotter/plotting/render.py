@@ -108,6 +108,8 @@ def save_data_mc_ratio_plot(
     bin_edges: np.ndarray,
     data_counts: np.ndarray,
     mc_samples: dict[str, np.ndarray],
+    data_unc: np.ndarray | None = None,
+    mc_total_unc: np.ndarray | None = None,
     out_path: str,
     xlabel: str,
     get_color,
@@ -147,22 +149,45 @@ def save_data_mc_ratio_plot(
 
         bottom += vals
 
+    # Uncertainties
+    if data_unc is None:
+        data_unc = np.sqrt(np.maximum(data_counts, 0.0))
+    if mc_total_unc is None:
+        # Fallback: assume unweighted Poisson statistics.
+        mc_total_unc = np.sqrt(np.maximum(total_mc, 0.0))
+
+    # Draw total MC(+QCD) uncertainty band on the main axis (hatched).
+    mc_low = np.maximum(total_mc - mc_total_unc, 0.0)
+    mc_high = total_mc + mc_total_unc
+    x_step = bin_edges
+    y1 = np.r_[mc_low, mc_low[-1]]
+    y2 = np.r_[mc_high, mc_high[-1]]
+    ax.fill_between(
+        x_step,
+        y1,
+        y2,
+        step="post",
+        facecolor="none",
+        edgecolor="black",
+        hatch="////",
+        linewidth=0.0,
+        alpha=0.4,
+        label="MC unc.",
+        zorder=2,
+    )
+
     ax.errorbar(
         bin_centers,
         data_counts,
-        yerr=np.sqrt(data_counts),
+        yerr=data_unc,
         fmt="o",
         color="black",
         label="Data",
-    )
-
-    ax.step(
-        bin_edges[:-1],
-        total_mc,
-        where="post",
-        color="black",
-        linewidth=1,
-        label="MC total",
+        markersize=3.0,
+        elinewidth=1.0,
+        capsize=1.5,
+        capthick=1.0,
+        zorder=3,
     )
 
     ax.set_ylabel("Events")
@@ -175,8 +200,50 @@ def save_data_mc_ratio_plot(
         where=total_mc != 0,
     )
 
+    ratio_unc = np.divide(
+        data_unc,
+        total_mc,
+        out=np.zeros_like(data_unc, dtype=float),
+        where=total_mc != 0,
+    )
+
+    rel_mc_unc = np.divide(
+        mc_total_unc,
+        total_mc,
+        out=np.zeros_like(mc_total_unc, dtype=float),
+        where=total_mc != 0,
+    )
+
     rax.axhline(1.0, linestyle="--", color="black")
-    rax.plot(bin_centers, ratio, "o", color="black")
+
+    # MC uncertainty band in ratio: 1 +/- (sigma_mc / mc)
+    rlow = 1.0 - rel_mc_unc
+    rhigh = 1.0 + rel_mc_unc
+    rax.fill_between(
+        x_step,
+        np.r_[rlow, rlow[-1]],
+        np.r_[rhigh, rhigh[-1]],
+        step="post",
+        facecolor="none",
+        edgecolor="black",
+        hatch="////",
+        linewidth=0.0,
+        alpha=0.4,
+        zorder=1,
+    )
+
+    rax.errorbar(
+        bin_centers,
+        ratio,
+        yerr=ratio_unc,
+        fmt="o",
+        color="black",
+        markersize=3.0,
+        elinewidth=1.0,
+        capsize=1.5,
+        capthick=1.0,
+        zorder=2,
+    )
     rax.set_ylabel("Data/MC")
     rax.set_xlabel(xlabel)
     rax.set_ylim(0.5, 1.5)

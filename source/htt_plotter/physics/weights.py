@@ -18,12 +18,13 @@ def compute_mc_weight(sample_name: str, params: dict, cache: dict | None = None)
 
     xs = sample_params.get("xs", 1.0)
     eff = sample_params.get("eff", 1.0)
+    filter_eff = sample_params.get("filter_efficiency", 1.0)
     lumi = (params or {}).get("lumi", 1.0)
 
     if eff == 0:
         return 0.0
 
-    weight = (xs * lumi) / eff
+    weight = (xs * lumi * filter_eff) / eff
 
     if cache is not None:
         cache[sample_name] = weight
