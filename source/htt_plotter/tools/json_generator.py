@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
-OUTPUT_ROOT = PROJECT_ROOT / "output"
+OUTPUT_ROOT = PROJECT_ROOT / "data" / "output"
 MC_BASE_DEFAULT = OUTPUT_ROOT / "test_plotter"
 
 YEAR = "Run3_2024"
@@ -30,26 +30,12 @@ def get_color(i: int) -> str:
 
 
 def _anchor_to_project_root(p: Path) -> Path:
-    """Return an absolute path.
-
-    If `p` is relative, interpret it relative to PROJECT_ROOT (not CWD).
-    This makes CLI usage consistent no matter where the module is executed from.
-    """
-
     if p.is_absolute():
         return p
-    return (PROJECT_ROOT / p)
+    return PROJECT_ROOT / p
 
 
 def _format_path(p: Path, *, path_mode: str) -> str:
-    """Format a file path for files.json.
-
-    path_mode:
-      - 'relative': require paths relative to PROJECT_ROOT (errors otherwise)
-      - 'absolute': always write absolute paths
-      - 'auto': relative when possible, else absolute
-    """
-
     if path_mode not in {"relative", "absolute", "auto"}:
         raise ValueError(f"Unsupported path_mode: {path_mode}")
 
@@ -65,6 +51,48 @@ def _format_path(p: Path, *, path_mode: str) -> str:
     else:
         return rel
 
+def smart_group(name: str) -> str:
+
+    patterns = [
+        (r"DYto2Mu", "DYto2Mu"),
+        (r"DYto2Tau", "DYto2Tau"),
+        (r"TT", "TT"),
+        (r"WtoLNu|WtoTauNu", "W"),
+        (r"Zto2Mu", "Zto2Mu"),
+        (r"Zto2Tau", "Zto2Tau"),
+        (r"Higgs", "Higgs"),
+    ]
+
+    for pattern, group in patterns:
+        if re.search(pattern, name):
+            return group
+
+    return name.split("_")[0]
+
+
+def build_process_map(samples: dict[str, dict]) -> dict[str, list[str]]:
+    groups: dict[str, list[str]] = {}
+
+    for sample_name in samples.keys():
+        group = smart_group(sample_name)
+
+        if group not in groups:
+            groups[group] = []
+
+        groups[group].append(sample_name)
+
+    return groups
+
+def add_process_colors(process_map: dict[str, list[str]]) -> dict:
+    processes = sorted(process_map.keys())
+
+    return {
+        p: {
+            "samples": process_map[p],
+            "color": get_color(i)
+        }
+        for i, p in enumerate(processes)
+    }
 
 def scan_mc_samples(
     base_dir: Path,
@@ -73,7 +101,6 @@ def scan_mc_samples(
     channel: str = CHANNEL,
     path_mode: str = "auto",
 ) -> dict:
-    """Scan MC folders and return samples with explicit file lists."""
 
     base_dir = _anchor_to_project_root(base_dir)
     base_path = base_dir / year / channel
@@ -81,64 +108,53 @@ def scan_mc_samples(
     print(f"Scanning MC base: {base_path}")
 
     samples: dict[str, dict] = {}
-    idx = 0
 
     if not base_path.exists():
-        print("MC base does not exist; no MC samples found")
+        print("MC base does not exist")
         return samples
 
     for process_dir in sorted([p for p in base_path.iterdir() if p.is_dir()]):
+
         sample_name = process_dir.name
 
-        # Do NOT call resolve() here: it would dereference symlinks and can
-        # turn project-relative paths into external EOS absolute paths.
-        files = sorted({p for p in process_dir.rglob("*.parquet") if p.is_file()})
+        files = sorted(process_dir.rglob("*.parquet"))
         if not files:
             continue
 
-        print(f"  MC sample: {sample_name} | files: {len(files)}")
+        print(f"  Sample: {sample_name} | files: {len(files)}")
 
         samples[sample_name] = {
             "kind": "mc",
             "scale": 1.0,
-            "color": get_color(idx),
             "files": [_format_path(p, path_mode=path_mode) for p in files],
         }
 
-        idx += 1
-
+    print(f"Found samples: {len(samples)}")
     return samples
 
+def write_json(obj: dict, path: Path, name: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-def write_files_json(samples: dict, out_path: Path) -> None:
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Writing {name}: {path} | entries={len(obj)}")
 
-    total_files = 0
-    for cfg in (samples or {}).values():
-        total_files += len(cfg.get("files", []) or [])
-
-    print(f"Writing files.json: {out_path} | samples={len(samples)} | total_files={total_files}")
-
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(samples, f, indent=4)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=4)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate files.json for a plotter config")
+    parser = argparse.ArgumentParser(description="Generate files.json + process.json")
+
     parser.add_argument("--config-name", default="config_0")
     parser.add_argument("--year", default=YEAR)
     parser.add_argument("--channel", default=CHANNEL)
-    parser.add_argument(
-        "--mc-base",
-        default=str(MC_BASE_DEFAULT),
-        help="Base folder containing MC samples (default: output/test_plotter)",
-    )
+    parser.add_argument("--mc-base", default=str(MC_BASE_DEFAULT))
+
     parser.add_argument(
         "--path-mode",
         choices=["auto", "relative", "absolute"],
         default="auto",
-        help="How to store file paths inside files.json",
     )
+
     args = parser.parse_args(argv)
 
     mc_base = _anchor_to_project_root(Path(args.mc_base))
@@ -150,10 +166,19 @@ def main(argv: list[str] | None = None) -> int:
         path_mode=args.path_mode,
     )
 
-    out_path = PROJECT_ROOT / "Configurations" / args.config_name / "files.json"
-    write_files_json(samples, out_path)
+    out_dir = PROJECT_ROOT / "Configurations" / args.config_name
+    files_path = out_dir / "files.json"
+    write_json(samples, files_path, "files.json")
 
-    print(f"Saved files.json → {out_path}")
+    process_path = out_dir / "process.json"
+    process_map = build_process_map(samples)
+    process_json = add_process_colors(process_map)
+
+    write_json(process_json, process_path, "process.json")
+
+    print(f"Saved files.json   → {files_path}")
+    print(f"Saved process.json → {process_path}")
+
     return 0
 
 

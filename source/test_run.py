@@ -18,7 +18,7 @@ if __name__ == "__main__":
         ],
     )
 
-    config_name = "config_csv"
+    config_name = "config_0"
 
     config_dir = project_root / "Configurations" / config_name
 

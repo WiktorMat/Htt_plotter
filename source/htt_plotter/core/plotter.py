@@ -51,6 +51,13 @@ class Plotter:
             self.plotter_config,
             self.process_config,
         ) = load_configs(self.project_root, self.config_name)
+        
+        self.process_config = self.process_config
+
+        self.sample_to_process = self._build_sample_to_process_map()
+        self.process_colors = self._build_process_colors()
+        print("PROCESS COLORS:", self.process_colors)
+        print("SAMPLE MAP:", self.sample_to_process)
 
         runtime = self.plotter_config.get("plotter_runtime") or {}
 
@@ -69,8 +76,40 @@ class Plotter:
 
         self.logger = logging.getLogger(__name__)
 
-    def get_sample_color(self, sample: str) -> str:
-        return get_sample_color(sample, self.sample_config)
+    def _build_sample_to_process_map(self) -> dict[str, str]:
+        mapping: dict[str, str] = {}
+
+        for process_name, cfg in (self.process_config or {}).items():
+            if isinstance(cfg, dict):
+                samples = cfg.get("samples", [])
+            elif isinstance(cfg, list):
+                samples = cfg
+            else:
+                samples = []
+
+            for sample in samples:
+                mapping[sample] = process_name
+
+        return mapping
+
+
+    def _build_process_colors(self) -> dict[str, str]:
+        colors: dict[str, str] = {}
+
+        for process_name, cfg in (self.process_config or {}).items():
+            if isinstance(cfg, dict):
+                colors[process_name] = cfg.get("color", "black")
+            else:
+                colors[process_name] = "black"
+
+        return colors
+
+
+    def _sample_to_process(self, sample: str) -> str:
+        return self.sample_to_process.get(sample, sample)
+
+    def _get_process_color(self, process: str) -> str:
+        return self.process_colors.get(process, "black")
 
     def load_index(self) -> None:
         self.index = self.data_access.build_index()
@@ -130,7 +169,6 @@ class Plotter:
         col = batch.column(batch.schema.get_field_index(name))
         return col.to_numpy(zero_copy_only=False)
     
-    from pathlib import Path
 
 
     def _save_histograms_parquet(self, histograms: dict[str, np.ndarray], edges: np.ndarray, out_path: str, plot_type: str, variable: str,) -> None:
@@ -202,7 +240,7 @@ class Plotter:
                     title=f"Control: {variable}",
                     xlabel=variable,
                     out_path=str(out_path),
-                    get_color=self.get_sample_color,
+                    get_color=self._get_process_color,
                     layout=self.layout,
                 )
 
@@ -233,7 +271,7 @@ class Plotter:
                     title=f"Resolution: {variable}",
                     xlabel=variable,
                     out_path=str(out_path),
-                    get_color=self.get_sample_color,
+                    get_color=self._get_process_color,
                     layout=self.layout,
                 )
 
@@ -275,7 +313,7 @@ class Plotter:
                     mc_samples=mc_samples,
                     out_path=str(out_path),
                     xlabel=variable,
-                    get_color=self.get_sample_color,
+                    get_color=self._get_process_color,
                 )
 
                 self.logger.info("Rendered mc/data from parquet: %s", out_path)
@@ -409,7 +447,8 @@ class Plotter:
                             edges = control_edges[var]
                             counts, _ = np.histogram(values[mask], bins=edges)
                             counts = counts * scale
-                            add_histogram(control_hists[var], sample, counts)
+                            process = self._sample_to_process(sample)
+                            add_histogram(control_hists[var], process, counts)
 
                     # Resolution plots
                     if do_resolution and present_pairs:
@@ -435,7 +474,8 @@ class Plotter:
                             edges = resolution_edges[(c, r)]
                             counts, _ = np.histogram(resolution, bins=edges)
                             counts = counts * scale
-                            add_histogram(resolution_hists[(c, r)], sample, counts)
+                            process = self._sample_to_process(sample)
+                            add_histogram(resolution_hists[(c, r)], process, counts)
 
                     # MC/Data agreement (OS/SS)
                     if do_mc_data and present_control and ("os" in schema) and ("os" in batch.schema.names):
@@ -454,15 +494,18 @@ class Plotter:
                                 counts = counts * mc_weight
                                 sumw2 = counts * (mc_weight**2)
 
+                                process = self._sample_to_process(sample)
+
                                 region = agreement[var][region_name]
-                                if sample not in region:
-                                    region[sample] = {
+
+                                if process not in region:
+                                    region[process] = {
                                         "counts": np.zeros(len(edges) - 1, dtype=float),
                                         "sumw2": np.zeros(len(edges) - 1, dtype=float),
                                     }
 
-                                region[sample]["counts"] += counts
-                                region[sample]["sumw2"] += sumw2
+                                region[process]["counts"] += counts
+                                region[process]["sumw2"] += sumw2
 
             # Render control
             if do_control:
@@ -476,7 +519,7 @@ class Plotter:
                         title=f"Control: {var}",
                         xlabel=var,
                         out_path=out_path,
-                        get_color=self.get_sample_color,
+                        get_color=self._get_process_color,
                         layout=self.layout,
                     )
 
@@ -502,7 +545,7 @@ class Plotter:
                         title=f"Resolution: {r} vs {c}",
                         xlabel=f"res_{r}",
                         out_path=out_path,
-                        get_color=self.get_sample_color,
+                        get_color=self._get_process_color,
                         layout=self.layout,
                     )
                     self._save_histograms_parquet(
@@ -550,7 +593,7 @@ class Plotter:
                         mc_samples=mc_samples,
                         out_path=out_path,
                         xlabel=var,
-                        get_color=self.get_sample_color,
+                        get_color=self._get_process_color,
                     )
                     combined = {"data": data_counts, **mc_samples}
 

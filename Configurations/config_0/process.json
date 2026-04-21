@@ -1,0 +1,26 @@
+{
+    "DYto2Mu": {
+        "samples": [
+            "DYto2Mu-2Jets_Bin-0J-MLL-50"
+        ],
+        "color": "tab:blue"
+    },
+    "DYto2Tau": {
+        "samples": [
+            "DYto2Tau-2Jets_Bin-0J-MLL-50"
+        ],
+        "color": "tab:orange"
+    },
+    "TT": {
+        "samples": [
+            "TTto2L2Nu"
+        ],
+        "color": "tab:green"
+    },
+    "W": {
+        "samples": [
+            "WtoTauNu-2Jets"
+        ],
+        "color": "tab:red"
+    }
+}
