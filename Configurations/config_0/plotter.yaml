@@ -20,3 +20,11 @@ plotting:
     - METy
     - pt_2
     - eta_2
+
+plotter_runtime:
+  xlim_control: 100
+  xlim_resolution: 50
+  bins: 20
+  alpha: 0.4
+  layout: stacked
+  mode: raw

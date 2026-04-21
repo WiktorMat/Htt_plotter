@@ -31,7 +31,17 @@ class Plotter:
     - can fill all histograms in a single pass over the data
     """
 
-    def __init__(self, config_name: str = "config_0"):
+    def __init__(
+        self,
+        config_name: str = "config_0",
+        *,
+        xlim_control: float | None = None,
+        xlim_resolution: float | None = None,
+        bins: int | None = None,
+        alpha: float | None = None,
+        layout: str | None = None,
+        mode: str | None = None,
+    ):
         self.config_name = config_name
         self.project_root = Path(__file__).resolve().parents[3]
 
@@ -59,7 +69,20 @@ class Plotter:
         print("PROCESS COLORS:", self.process_colors)
         print("SAMPLE MAP:", self.sample_to_process)
 
-        runtime = self.plotter_config.get("plotter_runtime") or {}
+        runtime = dict(self.plotter_config.get("plotter_runtime") or {})
+
+        if xlim_control is not None:
+            runtime["xlim_control"] = xlim_control
+        if xlim_resolution is not None:
+            runtime["xlim_resolution"] = xlim_resolution
+        if bins is not None:
+            runtime["bins"] = bins
+        if alpha is not None:
+            runtime["alpha"] = alpha
+        if layout is not None:
+            runtime["layout"] = layout
+        if mode is not None:
+            runtime["mode"] = mode
 
         self.xlim_ctrl = runtime.get("xlim_control", 100)
         self.xlim_resol = runtime.get("xlim_resolution", 50)
@@ -371,7 +394,7 @@ class Plotter:
             agreement: dict[str, dict[str, dict[str, dict[str, np.ndarray]]]] = {
                 v: {"OS": {}, "SS": {}} for v in self.contr_name
             }
-            sample_kinds: dict[str, str] = {}
+            process_kinds: dict[str, str] = {}
 
             selection_cfg = self.plotter_config.get("selection", {}) or {}
             selection_cols = selection_columns_used(selection_cfg)
@@ -392,7 +415,10 @@ class Plotter:
                     len(schema),
                 )
 
-                sample_kinds[sample] = kind
+                process = self._sample_to_process(sample)
+                # If a process contains any data sample, treat the whole process as data.
+                if kind == "data" or process not in process_kinds:
+                    process_kinds[process] = kind
 
                 # Determine which columns we actually need for this sample.
                 present_control = [v for v in self.contr_name if v in schema]
@@ -431,9 +457,9 @@ class Plotter:
                     params_key = (self.sample_config.get(sample) or {}).get("params_key", sample)
                     mc_weight = compute_mc_weight(params_key, self.params, cache=self._mc_weight_cache)
 
-                print("BEFORE:", columns)
+                self.logger.debug("Columns BEFORE (%s): %s", sample, columns)
                 columns = [c for c in columns if c in item["schema"]]
-                print("AFTER:", columns)
+                self.logger.debug("Columns AFTER  (%s): %s", sample, columns)
 
                 for batch in self.data_access.iter_batches(item, columns=columns, filter_expr=filter_expr):
                     # Control plots
@@ -507,6 +533,9 @@ class Plotter:
                                 region[process]["counts"] += counts
                                 region[process]["sumw2"] += sumw2
 
+            if do_mc_data:
+                self.logger.info("Process kinds (for MC/Data): %s", process_kinds)
+
             # Render control
             if do_control:
                 for var, hist in control_hists.items():
@@ -566,7 +595,7 @@ class Plotter:
                     add_qcd_from_ss(
                         histograms,
                         {"add_qcd_from_ss": True, "qcd_ff": 1.0},
-                        sample_kinds,
+                        process_kinds,
                     )
 
                     samples = histograms["OS"]
@@ -575,7 +604,7 @@ class Plotter:
                     mc_samples: dict[str, np.ndarray] = {}
 
                     for name, hist in samples.items():
-                        if sample_kinds.get(name, "mc") == "data":
+                        if process_kinds.get(name, "mc") == "data":
                             if data_counts is None:
                                 data_counts = hist["counts"].copy()
                             else:

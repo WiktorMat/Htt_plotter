@@ -1,41 +1,233 @@
 {
-    "Data": {
-    "kind": "data",
-    "color": "black",
-    "dirs": [
-      "/eos/user/h/haawedik/ditau_analysis/Run3_2024/mt/DYto2Tau-2Jets_Bin-1J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/nominal/"
-    ]
-  },
-  "DYto2Mu-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8": {
-    "kind": "mc",
-    "scale": 1.0,
-    "color": "tab:blue",
-    "dirs": [
-      "/eos/user/h/haawedik/ditau_analysis/Run3_2024/mt/DYto2Mu-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/nominal/"
-    ]
-  },
-  "DYto2Tau-2Jets_Bin-0J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8": {
-    "kind": "mc",
-    "scale": 1.0,
-    "color": "tab:orange",
-    "dirs": [
-      "/eos/user/h/haawedik/ditau_analysis/Run3_2024/mt/DYto2Tau-2Jets_Bin-0J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/nominal/"
-    ]
-  },
-  "TTto2L2Nu": {
-    "kind": "mc",
-    "scale": 1.0,
-    "color": "tab:red",
-    "dirs": [
-      "/eos/user/h/haawedik/ditau_analysis/Run3_2024/mt/TTto2L2Nu/nominal/"
-    ]
-  },
-  "WtoLNu_1J_madgraphMLM": {
-    "kind": "mc",
-    "scale": 1.0,
-    "color": "tab:green",
-    "dirs": [
-      "/eos/user/h/haawedik/ditau_analysis/Run3_2024/mt/WtoLNu_1J_madgraphMLM/nominal/"
-    ]
-  }
+    "DYto2E-2Jets_Bin-0J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/DYto2E-2Jets_Bin-0J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "DYto2E-2Jets_Bin-1J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/DYto2E-2Jets_Bin-1J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "DYto2E-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/DYto2E-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "DYto2Mu-2Jets_Bin-0J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/DYto2Mu-2Jets_Bin-0J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "DYto2Mu-2Jets_Bin-1J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/DYto2Mu-2Jets_Bin-1J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "DYto2Mu-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/DYto2Mu-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "DYto2Tau-2Jets_Bin-0J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/DYto2Tau-2Jets_Bin-0J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "DYto2Tau-2Jets_Bin-1J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/DYto2Tau-2Jets_Bin-1J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "DYto2Tau-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/DYto2Tau-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "Muon0": {
+        "kind": "data",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/Muon0/nominal/merged.parquet"
+        ]
+    },
+    "Muon1": {
+        "kind": "data",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/Muon1/nominal/merged.parquet"
+        ]
+    },
+    "TBbarQtoLNu-t-channel-4FS_TuneCP5_13p6TeV_powheg-madspin-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/TBbarQtoLNu-t-channel-4FS_TuneCP5_13p6TeV_powheg-madspin-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "TTto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/TTto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "TTto4Q_TuneCP5_13p6TeV_powheg-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/TTto4Q_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "TTtoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/TTtoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "TWminusto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/TWminusto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "TWminustoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/TWminustoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "TbarBQtoLNu-t-channel-4FS_TuneCP5_13p6TeV_powheg-madspin-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/TbarBQtoLNu-t-channel-4FS_TuneCP5_13p6TeV_powheg-madspin-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "TbarWplusto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/TbarWplusto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "TbarWplustoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/TbarWplustoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "WWto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/WWto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "WWto4Q_TuneCP5_13p6TeV_powheg-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/WWto4Q_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "WWtoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/WWtoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "WZ_TuneCP5_13p6TeV_pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/WZ_TuneCP5_13p6TeV_pythia8/nominal/merged.parquet"
+        ]
+    },
+    "WZto2L2Q_TuneCP5_13p6TeV_powheg-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/WZto2L2Q_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "WtoENu-2Jets_TuneCP5_13p6TeV_amcatnloFXFX-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/WtoENu-2Jets_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "WtoMuNu-2Jets_TuneCP5_13p6TeV_amcatnloFXFX-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/WtoMuNu-2Jets_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "WtoTauNu-2Jets_TuneCP5_13p6TeV_amcatnloFXFX-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/WtoTauNu-2Jets_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "ZZ_TuneCP5_13p6TeV_pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/ZZ_TuneCP5_13p6TeV_pythia8/nominal/merged.parquet"
+        ]
+    },
+    "ZZto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/ZZto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "ZZto2L2Q_TuneCP5_13p6TeV_powheg-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/ZZto2L2Q_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "ZZto2Nu2Q_TuneCP5_13p6TeV_powheg-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/ZZto2Nu2Q_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+        ]
+    },
+    "ZZto4L_TuneCP5_13p6TeV_powheg-pythia8": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "output/test_plotter/Run3_2024/mt/ZZto4L_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+        ]
+    }
 }

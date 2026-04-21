@@ -42,7 +42,7 @@ if __name__ == "__main__":
         xlim_resolution=50,
         bins=20,
         alpha=0.4,
-        layout="side_by_side",
+        layout="stacked",
         config_name=config_name,
         mode="raw",
     )

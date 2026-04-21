@@ -7,7 +7,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
-OUTPUT_ROOT = PROJECT_ROOT / "data" / "output"
+OUTPUT_ROOT = PROJECT_ROOT / "output"
 MC_BASE_DEFAULT = OUTPUT_ROOT / "test_plotter"
 
 YEAR = "Run3_2024"
@@ -52,22 +52,18 @@ def _format_path(p: Path, *, path_mode: str) -> str:
         return rel
 
 def smart_group(name: str) -> str:
-
-    patterns = [
-        (r"DYto2Mu", "DYto2Mu"),
-        (r"DYto2Tau", "DYto2Tau"),
-        (r"TT", "TT"),
-        (r"WtoLNu|WtoTauNu", "W"),
-        (r"Zto2Mu", "Zto2Mu"),
-        (r"Zto2Tau", "Zto2Tau"),
-        (r"Higgs", "Higgs"),
-    ]
-
-    for pattern, group in patterns:
-        if re.search(pattern, name):
-            return group
-
-    return name.split("_")[0]
+    # Target process grouping used by the plotter.
+    # Keep this intentionally simple and aligned with config expectations.
+    if re.match(r"^Muon\d+$", name):
+        return "data"
+    if re.match(r"^DYto", name):
+        return "DY"
+    # tt group includes ttbar and single-top (tW, t-channel) samples
+    if re.match(r"^(TT|TW|TbarW|TBbar|TbarB)", name):
+        return "tt"
+    if re.match(r"^Wto", name):
+        return "W+jets"
+    return "others"
 
 
 def build_process_map(samples: dict[str, dict]) -> dict[str, list[str]]:
@@ -121,10 +117,16 @@ def scan_mc_samples(
         if not files:
             continue
 
+        merged = [p for p in files if p.name == "merged.parquet"]
+        if merged:
+            # Prefer merged parquet to avoid double-counting job shards.
+            files = merged
+
         print(f"  Sample: {sample_name} | files: {len(files)}")
 
+        kind = "data" if smart_group(sample_name) == "data" else "mc"
         samples[sample_name] = {
-            "kind": "mc",
+            "kind": kind,
             "scale": 1.0,
             "files": [_format_path(p, path_mode=path_mode) for p in files],
         }
