@@ -44,6 +44,7 @@ if __name__ == "__main__":
         alpha=0.4,
         layout="stacked",
         config_name=config_name,
+        mode="raw",
     )
 
     plotter.run_all()

@@ -1,69 +1,155 @@
-# Documentation of Htt_plotter program:
+# Htt_plotter Documentation
 
-## General information:
-    Program generates Histograms from data it gets when user give configuration(in Configurations folder then changing in run name of the configuration) they want tu use. Core file is plotter which transform data to plots. Data_access is file that changes raw data from files to stream that next is used in plotter. Function in loader.py loading all configurations files, send warrnigs if something is missing and normalize selected configurationes. Script that automatically generates json configurator scans folders in search of data files.
-        
+# 1. Overview
+    `Htt_plotter` is a Python-based plotting framework used to generate histograms from structured datasets such as CSV and Parquet files.
 
-## What user can do:
-    User specify what data he wants to use and how it should be configurated for his personal desire.
+    The program reads user-defined configurations stored in the `Configurations/` directory and produces:
+    - control histograms,
+    - resolution histograms,
+    - comparisons between Monte Carlo (MC) simulation and real data,
+    - stacked plots,
+    - Data/MC ratio plots,
+    - QCD background estimations.
 
-## Specific information about files:
+    The core component of the project is the `Plotter` class, which manages the full workflow: loading data, applying selections, filling histograms, and saving plots.
 
-### Plotter.py:
-    It contains class plotter which in this file is a main pipline that transform data to plots (control, resolution and comparision of MC and real data). 
-    Core methodes are:
-        a. load_index - it is building dataset index from configurated samples;
-        b. set_parameters - it determines which variables will be ploted;
-        c. batch - it creates pairs of variables that will be used in the resolution plots ;
-        d. _bin_edges - return edges of bins used in histograms;
-        e. _to_numpy - extracts column from batch;
-        f. Main pipepline - run_all:
-            - reads data;
-            - fills histograms;
-            - generates plots.
+# 2. Main Features
+    Users can control:
+    - which dataset is used,
+    - how data is filtered,
+    - which variables are plotted,
+    - histogram appearance,
+    - plot layout,
+    - binning and axis ranges,
+    - output configuration.
 
-### data_access.py:
-    It contains class DataAccess which changes raw data from files (CSV/Parquet) to data stream. Mainly it does: building list of data files, analyze data and shares data as batch stream. 
-    Core methodes are:
-        a. _resolve_files - changes paths relative to absolute;
-        b. _scan_dirs - scans folders for files: CSV or Parquet;
-        c. _infer_format - checks if file types are supported in program;
-        d. _sample_schema - takes heads of the columns from files;
-        e. build_index - creates structure of every dataset;
-        f. iter_batches - return data in stream.
+    The system is modular, so each file is responsible for a specific part of the pipeline.
 
-### loader.py:
-    This  has one function which loads all configuration files requeired by the Plotter, fro given by user configuration. It loads JSON and YAML configurations or if they are missing function raises Error. After loading, the function normalize configurationes to ensure everything exists.
+# 3. Project Structure
 
-### json_generator.py:
-    Script in this file automatically scans MC and Data directiories and creates JSON file that is then used by pipline. 
-    It contains functions:
-        a. get_color - return a color from the color_palette;
-        b. _rel - return a relative path to the project root;
-        c. scan_mc_samples - scans MC folders and return samples with file list;
-        d. add_data - adds scaned data files to the samples dictionary ;
-        e. write_files_json - writes the final JSON configuration file;
-        f. main - runs the full pipeline: scanning MC, adding data, and saving the output JSON.
+### `plotter.py`
+   Contains the `Plotter` class, which is the main pipeline of the project.
 
-### render.py:
-    It saves stacked plots(control, resolution and MC to Data ratio) and defines the visual appearence of plots such as: width, colors, labels, legend, title, grid, stacking order, figure layout.
-    It contain functions:
-        a. save_stacked_plot - creates and saves stacked histograms(control and resolution plots) and creates their look;
-        b. save_data_mc_ratio_plot - saves plot MC to Data ration and creates its look.
+    It is responsible for transforming input data into plots.
 
-### selection.py:
-    It is responsible for selection of data and filtration of columns and records based on configuration. It reduces and prepares datasets for plotting and analysis.
-    It contain functions:
-        a. selection_columns_used - return list of columns required for selection based on configuration;
-        b. selection_mask - creates a boolean mask for filtering events using Pandas; 
-        c. make_selector - return a function that applies selection to a DataFrame;
-        d. make_arrow_filter - builds a PyArrow filter expression for dataset-level filtering;
-        e. SELECT - applies selection directly to a DataFrame or file path;
-        f. plotting_columns - return available columns split into control and resolution groups for plotting.
+### Main methods:
+    - **load_index()**  
+    Builds the dataset index from configured samples.
 
+    - **set_parameters()**  
+    Determines which variables will be plotted.
 
-### qcd.py:
-    It is responsible for estimating QCD background using SS method. It builds QCD templates from data by removing MC from data in SS region, propagates the result to the OS region scaling it by factor.
+    - **batch()**  
+    Creates variable pairs used for resolution plots.
 
-### Configurations folder:
-    Contains Configurations that user want to use for generetaing plots, every Config need to contain 5 files: Config.py, files.json(automatically created by json_generator), variables.json, params.yaml and plotter.yaml.
+    - **_bin_edges()**  
+    Returns histogram bin edges.
+
+    - **_to_numpy()**  
+    Extracts selected columns into NumPy arrays.
+
+    - **run_all()**  
+    Main execution pipeline:
+    - loads data,
+    - applies selections,
+    - fills histograms,
+    - generates and saves plots.
+
+## `data_access.py`
+    Contains the `DataAccess` class.
+
+    Responsible for converting raw files (CSV / Parquet) into a streamed batch format used by `Plotter`.
+
+### Main methods:
+    - **_resolve_files()**  
+    Converts relative paths into absolute paths.
+
+    - **_scan_dirs()**  
+    Scans directories for supported files.
+
+    - **_infer_format()**  
+    Detects file type.
+
+    - **_sample_schema()**  
+    Reads column names and schema.
+
+    - **build_index()**  
+    Creates dataset metadata.
+
+    - **iter_batches()**  
+    Returns data in streaming batches.
+
+## `loader.py`
+    Loads all configuration files required by the program.
+
+    Supported formats:
+    - JSON
+    - YAML
+    - Python config files
+
+    If required files are missing, an error is raised.
+
+    The loader also validates and normalizes configuration content.
+
+## `json_generator.py`
+    Automatically scans data directories and creates `files.json`.
+
+    This file defines available datasets and their file locations.
+
+### Main functions:
+    - **get_color()** – assigns colors,
+    - **_rel()** – creates relative paths,
+    - **scan_mc_samples()** – scans MC samples,
+    - **add_data()** – adds real data,
+    - **write_files_json()** – saves configuration,
+    - **main()** – runs full generation pipeline.
+
+## `render.py`
+    Responsible for saving plots and defining visual appearance.
+
+    Controls:
+    - colors,
+    - legends,
+    - titles,
+    - labels,
+    - grids,
+    - layout,
+    - stacking order.
+
+### Main functions:
+    - **save_stacked_plot()**
+    - **save_data_mc_ratio_plot()**
+
+## `selection.py`
+    Responsible for filtering datasets and selecting variables.
+    Used before plotting.
+
+### Main functions:
+    - **selection_columns_used()**
+    - **selection_mask()**
+    - **make_selector()**
+    - **make_arrow_filter()**
+    - **SELECT()**
+    - **plotting_columns()**
+
+## `qcd.py`
+    Used for QCD background estimation with the SS method.
+
+    Workflow:
+    1. Build QCD template in SS region.
+    2. Subtract MC background from data.
+    3. Scale result to OS region.
+
+# 4. Configurations Directory
+    All user configurations are stored in folder:
+        Configurations/
+
+# How to run the program using test_run.py
+    To run the program with custom parameters, configure the following seven options: xlim_control, xlim_resolution, bins, alpha, layout and config_name, mode.
+        - xlim_control - sets the X-axis limit for control histograms,
+        - xlim_resolution - sets the X-axis limit for resolution histograms,
+        - bins is setting - defines the number of bins used in the histograms,
+        - alpha - controls the transparency of histogram bars,
+        - layout - determines how multiple histograms are displayed, available values: stacked, overlay, side by side,
+        - config_name - specifies which configuration directory should be used,
+        - mode - selects how data is processed and plotted, available modes: raw or hist
