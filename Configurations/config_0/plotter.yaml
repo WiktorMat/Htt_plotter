@@ -16,9 +16,9 @@ plotter_runtime:
   mode: raw
 
 extra_plots:
-  enable: true
+  enable: false
   asymmetry:
-    enable: true
+    enable: false
     column: aco_mu_rho
     bins: 8
     range: [0, 6.283185307179586]
