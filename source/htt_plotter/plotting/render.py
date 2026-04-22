@@ -131,9 +131,13 @@ def save_data_mc_ratio_plot(
 
     bottom = np.zeros_like(total_mc)
 
-    for name, vals in mc_samples.items():
-        color = "gray" if name == "QCD" else get_color(name)
-        label = "QCD (from SS)" if name == "QCD" else name
+    # Ensure QCD is drawn first so it appears at the bottom of the stack.
+    items = list(mc_samples.items())
+    items.sort(key=lambda kv: (0 if kv[0].lower() == "qcd" else 1))
+
+    for name, vals in items:
+        color = "green" if name.lower() == "qcd" else get_color(name)
+        label = "QCD (from SS)" if name.lower() == "qcd" else name
 
         ax.bar(
             bin_edges[:-1],
@@ -172,7 +176,7 @@ def save_data_mc_ratio_plot(
         hatch="////",
         linewidth=0.0,
         alpha=0.4,
-        label="MC unc.",
+        label="_nolegend_",
         zorder=2,
     )
 
