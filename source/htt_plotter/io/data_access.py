@@ -9,6 +9,10 @@ import time
 
 import pandas as pd
 
+from rich.console import Console
+from rich.live import Live
+from rich.table import Table
+
 
 class DataAccess:
     """I/O layer.
@@ -237,29 +241,89 @@ class DataAccess:
                 continue
 
             fmt = self._infer_format(files)
-            self.logger.info(
-                "Index sample '%s': kind=%s | source=%s | format=%s | files=%d",
-                sample_name,
-                kind,
-                source_kind,
-                fmt,
-                len(files),
-            )
-            schema = self._sample_schema(fmt, files, sample=sample_name)
 
-            index.append(
-                {
-                    "sample": sample_name,
-                    "kind": kind,
-                    "scale": scale,
-                    "color": color,
-                    "files": files,
-                    "format": fmt,
-                    "schema": set(schema),
-                }
-            )
+            console = Console()
+            history = []
 
-        return index
+            table = Table(title="Indexing samples")
+            table.add_column("Sample")
+            table.add_column("Kind")
+            table.add_column("Source")
+            table.add_column("Format")
+            table.add_column("Files")
+
+            index = []
+
+            sample_config = self.sample_config.get("samples", self.sample_config)
+
+            with Live(table, console=console, refresh_per_second=4) as live:
+
+                for sample_name, cfg in sample_config.items():
+
+                    kind = cfg.get("kind", "mc")
+                    scale = cfg.get("scale", 1.0)
+                    color = cfg.get("color", None)
+
+                    files_cfg = cfg.get("files")
+                    dirs_cfg = cfg.get("dirs")
+
+                    source_kind = "files" if files_cfg else "dirs"
+
+                    if files_cfg is not None:
+                        files = self._resolve_files(files_cfg)
+                    else:
+                        if dirs_cfg:
+                            self.logger.warning(
+                                "Sample '%s' uses 'dirs' scanning; generate explicit 'files' list for speed.",
+                                sample_name,
+                            )
+                        files = self._scan_dirs(dirs_cfg)
+
+                    files = [p for p in files if p.exists()]
+
+                    merged = [p for p in files if p.name == "merged.parquet"]
+                    if merged and len(files) > len(merged):
+                        self.logger.warning(
+                            "Sample '%s' uses merged.parquet only to avoid double counting.",
+                            sample_name,
+                        )
+                        files = merged
+
+                    if not files:
+                        self.logger.warning("No input files for sample: %s", sample_name)
+                        continue
+
+                    fmt = self._infer_format(files)
+
+                    history.append((sample_name, kind, source_kind, fmt, len(files)))
+
+                    table = Table(title="Indexing samples")
+                    table.add_column("Sample")
+                    table.add_column("Kind")
+                    table.add_column("Source")
+                    table.add_column("Format")
+                    table.add_column("Files")
+
+                    for row in history:
+                        table.add_row(*map(str, row))
+
+                    live.update(table)
+
+                    schema = self._sample_schema(fmt, files)
+
+                    index.append(
+                        {
+                            "sample": sample_name,
+                            "kind": kind,
+                            "scale": scale,
+                            "color": color,
+                            "files": files,
+                            "format": fmt,
+                            "schema": set(schema),
+                        }
+                    )
+
+            return index
 
     def iter_batches(
         self,

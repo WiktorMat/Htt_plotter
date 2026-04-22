@@ -16,6 +16,10 @@ from htt_plotter.plotting.pairs import make_resolution_pairs
 from htt_plotter.plotting.render import save_data_mc_ratio_plot, save_stacked_plot
 from htt_plotter.selection.selection import make_arrow_filter, selection_columns_used
 from htt_plotter.utils.fs import ensure_dir
+from rich.console import Console
+from rich.live import Live
+from rich.table import Table
+from rich.status import Status
 
 
 
@@ -332,21 +336,48 @@ class Plotter:
             selection_cfg = self.plotter_config.get("selection", {}) or {}
             selection_cols = selection_columns_used(selection_cfg)
 
-            self.logger.info("Beginning scan over %d samples", len(self.index))
+            console = Console()
 
-            for item in self.index:
-                sample = item["sample"]
-                kind = item.get("kind", "mc")
-                scale = item.get("scale", 1.0)
-                schema: set[str] = set(item.get("schema", set()))
+            with Live(console=console, refresh_per_second=4) as live:
+                for i, item in enumerate(self.index):
+                    sample = item["sample"]
+                    kind = item.get("kind", "mc")
 
-                self.logger.info(
-                    "Sample start: %s | kind=%s | files=%d | schema_cols=%d",
-                    sample,
-                    kind,
-                    len(item.get("files", []) or []),
-                    len(schema),
-                )
+                    table = Table(title="Processing samples")
+                    table.add_column("Index")
+                    table.add_column("Sample")
+                    table.add_column("Kind")
+
+                    table.add_row(str(i+1), sample, kind)
+
+                    live.update(table)
+
+            console = Console()
+
+            with Status("[bold green]Processing samples...", console=console) as status:
+
+                for item in self.index:
+                    sample = item["sample"]
+                    kind = item.get("kind", "mc")
+                    scale = item.get("scale", 1.0)
+                    schema = set(item.get("schema", set()))
+
+                    msg = (
+                        f"[cyan]Sample:[/cyan] {sample} | "
+                        f"[yellow]kind:[/yellow] {kind} | "
+                        f"[magenta]files:[/magenta] {len(item.get('files', []))} | "
+                        f"[green]cols:[/green] {len(schema)}"
+                    )
+
+                    status.update(msg)
+
+                    self.logger.info(
+                        "Sample start: %s | kind=%s | files=%d | schema_cols=%d",
+                        sample,
+                        kind,
+                        len(item.get("files", [])),
+                        len(schema)
+                    )
 
                 process = self._sample_to_process(sample)
                 # If a process contains any data sample, treat the whole process as data.
@@ -362,8 +393,6 @@ class Plotter:
                     or (do_resolution and bool(present_pairs))
                     or (do_mc_data and bool(present_control) and ("os" in schema))
                 )
-                if not has_work:
-                    continue
 
                 needed: set[str] = set()
                 if do_control:
