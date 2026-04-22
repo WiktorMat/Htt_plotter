@@ -26,3 +26,13 @@ plotter_runtime:
   alpha: 0.4
   layout: stacked
   mode: raw
+
+extra_plots:
+  enable: true
+  asymmetry:
+    enable: true
+    column: aco_mu_rho
+    bins: 8
+    range: [0, 6.283185307179586]
+    cp_weights: true
+    out_dir: plots/extra_plots

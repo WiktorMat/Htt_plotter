@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 from htt_plotter.backgrounds.qcd import add_qcd_from_ss
 from htt_plotter.config.loader import load_configs
@@ -21,6 +22,11 @@ from rich.live import Live
 from rich.table import Table
 from rich.status import Status
 
+try:
+    import uproot
+except ImportError:
+    uproot = None
+    print("Warning: uproot not installed, .root files will not be supported.")
 
 
 class Plotter:
@@ -186,6 +192,53 @@ class Plotter:
             cache=self._bin_cache,
         )
         return edges
+    
+    def calculate_asymmetry(self, hist_odd, hist_even):
+        diff = hist_odd - hist_even
+        sum_abs_diff = np.sum(np.abs(diff))
+        total_events = np.sum(hist_odd + hist_even)
+
+        asymmetry = sum_abs_diff / total_events if total_events > 0 else 0.0
+
+        self.logger.info("Sum |odd-even|: %.6f", sum_abs_diff)
+        self.logger.info("Total events: %.6f", total_events)
+
+        return asymmetry
+    
+    def plot_asymmetry(self, hist_even, hist_odd, cfg, column):
+        asymmetry = self.calculate_asymmetry(hist_odd, hist_even)
+
+        bins = cfg.get("bins", 20)
+        range_ = tuple(cfg.get("range", (0, 2*np.pi)))
+
+        centers = np.linspace(range_[0], range_[1], bins)
+        width = (range_[1] - range_[0]) / bins
+
+        plt.figure(figsize=(6, 4))
+
+        plt.bar(centers, hist_even, width=width, alpha=0.7, label="CP-even")
+        plt.bar(centers, hist_odd, width=width, alpha=0.7, label="CP-odd")
+
+        plt.xlabel(column)
+        plt.ylabel("Events")
+        plt.title("Decay Plane Asymmetry")
+
+        plt.text(
+            0.05, 0.95,
+            f"Asymmetry = {asymmetry:.4f}",
+            transform=plt.gca().transAxes,
+            bbox=dict(facecolor="white", alpha=0.8)
+        )
+
+        out_dir = cfg.get("out_dir", "plots/extra_plots")
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+        outpath = f"{out_dir}/{column}_asymmetry.png"
+        plt.tight_layout()
+        plt.savefig(outpath)
+        plt.close()
+
+        self.logger.info("Saved asymmetry plot: %s", outpath)
 
     @staticmethod
     def _to_numpy(batch, name: str) -> np.ndarray:
@@ -280,7 +333,7 @@ class Plotter:
                 self.logger.info("Rendered mc/data from parquet: %s", out_path)
     
     def run_all(self, *, do_control: bool = True, do_resolution: bool = True, do_mc_data: bool = True) -> None:
-        """Fill and render all plots in a single pass over input data."""        
+        """Fill and render all plots in a single pass over input data."""
 
         if self.mode == "hist":
             self.run_from_histograms(
@@ -356,6 +409,11 @@ class Plotter:
             console = Console()
 
             with Status("[bold green]Processing samples...", console=console) as status:
+
+                extra_cfg = self.plotter_config.get("plotter_runtime", {}).get("extra_plots", {})
+                asym_cfg = extra_cfg.get("asymmetry", {}) if isinstance(extra_cfg, dict) else {}
+
+                asymmetry_buffer = {}
 
                 for item in self.index:
                     sample = item["sample"]
@@ -496,6 +554,38 @@ class Plotter:
 
                                     region[process]["counts"] += counts
                                     region[process]["sumw2"] += sumw2
+
+                        if asym_cfg.get("enable", False):
+                            column = asym_cfg.get("column")
+
+                            if column in schema:
+
+                                values = self._to_numpy(batch, column)
+
+                                if asym_cfg.get("cp_weights", True):
+                                    w_even = self._to_numpy(batch, "wt_cp_sm")
+                                    w_odd = self._to_numpy(batch, "wt_cp_ps")
+                                else:
+                                    w_even = np.ones_like(values)
+                                    w_odd = np.ones_like(values)
+
+                                hist_even, _ = np.histogram(
+                                    values,
+                                    bins=asym_cfg["bins"],
+                                    range=tuple(asym_cfg["range"]),
+                                    weights=w_even
+                                )
+
+                                hist_odd, _ = np.histogram(
+                                    values,
+                                    bins=asym_cfg["bins"],
+                                    range=tuple(asym_cfg["range"]),
+                                    weights=w_odd
+                                )
+
+                                buf = asymmetry_buffer.setdefault(column, {"even": [], "odd": []})
+                                buf["even"].append(hist_even)
+                                buf["odd"].append(hist_odd)
 
                 if do_mc_data:
                     self.logger.info("Process kinds (for MC/Data): %s", process_kinds)
@@ -644,5 +734,21 @@ class Plotter:
                         )
 
                         self.logger.info("Saved MC/Data plot: %s (parquet: %s)", out_path, parquet_path)
+
+            if extra_cfg.get("enable", False) and asymmetry_buffer:
+                for column, data in asymmetry_buffer.items():
+
+                    if len(data["even"]) == 0 or len(data["odd"]) == 0:
+                        continue
+
+                    hist_even = np.sum(data["even"], axis=0)
+                    hist_odd = np.sum(data["odd"], axis=0)
+
+                    self.plot_asymmetry(
+                        hist_even,
+                        hist_odd,
+                        asym_cfg,
+                        column
+                    )
         else:
             self.logger.warning("There is no mode like that!")
