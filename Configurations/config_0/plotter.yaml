@@ -16,10 +16,8 @@ plotting:
     - eta_1
     - m_vis
   resolution:
-    - METx
-    - METy
-    - pt_2
-    - eta_2
+  - [pt_1, pt_2]
+  - [eta_1, eta_2]
 
 plotter_runtime:
   xlim_control: 100

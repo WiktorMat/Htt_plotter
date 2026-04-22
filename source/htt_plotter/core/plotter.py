@@ -66,6 +66,7 @@ class Plotter:
 
         self.logger = logging.getLogger(__name__)
 
+
         self.sample_to_process = self._build_sample_to_process_map()
         self.process_colors = self._build_process_colors()
         self.logger.debug("Process colors: %s", self.process_colors)
@@ -321,7 +322,7 @@ class Plotter:
 
             # Precompute bin edges
             control_edges = {v: self._bin_edges(v) for v in self.contr_name}
-            resolution_edges = {pair: self._bin_edges(f"res_{pair[1]}") for pair in self.resolution_pairs}
+            resolution_edges = {pair: self._bin_edges(pair[1]) for pair in self.resolution_pairs}
 
             # Histogram containers
             control_hists: dict[str, dict[str, np.ndarray]] = {v: {} for v in self.contr_name}
@@ -379,269 +380,269 @@ class Plotter:
                         len(schema)
                     )
 
-                process = self._sample_to_process(sample)
-                # If a process contains any data sample, treat the whole process as data.
-                if kind == "data" or process not in process_kinds:
-                    process_kinds[process] = kind
+                    process = self._sample_to_process(sample)
+                    # If a process contains any data sample, treat the whole process as data.
+                    if kind == "data" or process not in process_kinds:
+                        process_kinds[process] = kind
 
-                # Determine which columns we actually need for this sample.
-                present_control = [v for v in self.contr_name if v in schema]
-                present_pairs = [(c, r) for (c, r) in self.resolution_pairs if c in schema and r in schema]
+                    # Determine which columns we actually need for this sample.
+                    present_control = [v for v in self.contr_name if v in schema]
+                    present_pairs = [(c, r) for (c, r) in self.resolution_pairs if c in schema and r in schema]
 
-                has_work = (
-                    (do_control and bool(present_control))
-                    or (do_resolution and bool(present_pairs))
-                    or (do_mc_data and bool(present_control) and ("os" in schema))
-                )
+                    has_work = (
+                        (do_control and bool(present_control))
+                        or (do_resolution and bool(present_pairs))
+                        or (do_mc_data and bool(present_control) and ("os" in schema))
+                    )
 
-                needed: set[str] = set()
-                if do_control:
-                    needed |= set(present_control)
-                if do_resolution:
-                    for c, r in present_pairs:
-                        needed.add(c)
-                        needed.add(r)
-                if do_mc_data:
-                    needed |= set(present_control)
-                    needed.add("os")
-
-                # Columns needed to evaluate selection (for dataset filter).
-                needed |= {c for c in selection_cols if c in schema}
-
-                columns = sorted(needed)
-
-                filter_expr = make_arrow_filter(self.plotter_config, schema)
-
-                # Compute constant MC weight once per sample for agreement plots.
-                if kind == "data":
-                    mc_weight = 1.0
-                else:
-                    params_key = (self.sample_config.get(sample) or {}).get("params_key", sample)
-                    mc_weight = compute_mc_weight(params_key, self.params, cache=self._mc_weight_cache)
-
-                self.logger.debug("Columns BEFORE (%s): %s", sample, columns)
-                columns = [c for c in columns if c in item["schema"]]
-                self.logger.debug("Columns AFTER  (%s): %s", sample, columns)
-
-                for batch in self.data_access.iter_batches(item, columns=columns, filter_expr=filter_expr):
-                    # Control plots
-                    if do_control and present_control:
-                        for var in present_control:
-                            values = self._to_numpy(batch, var)
-                            mask = np.isfinite(values)
-                            if not np.any(mask):
-                                continue
-
-                            edges = control_edges[var]
-                            counts, _ = np.histogram(values[mask], bins=edges)
-                            counts = counts * scale
-                            process = self._sample_to_process(sample)
-                            add_histogram(control_hists[var], process, counts)
-
-                    # Resolution plots
-                    if do_resolution and present_pairs:
+                    needed: set[str] = set()
+                    if do_control:
+                        needed |= set(present_control)
+                    if do_resolution:
                         for c, r in present_pairs:
-                            cv = self._to_numpy(batch, c)
-                            rv = self._to_numpy(batch, r)
+                            needed.add(c)
+                            needed.add(r)
+                    if do_mc_data:
+                        needed |= set(present_control)
+                        needed.add("os")
 
-                            mask = np.isfinite(cv) & np.isfinite(rv) & (cv != 0)
-                            if not np.any(mask):
-                                continue
+                    # Columns needed to evaluate selection (for dataset filter).
+                    needed |= {c for c in selection_cols if c in schema}
 
-                            var_cfg = self.variable_config.get(r, {})
+                    columns = sorted(needed)
 
-                            is_angle = var_cfg.get("type") == "angle"
-                            relative = var_cfg.get("relative_resolution", True)
+                    filter_expr = make_arrow_filter(self.plotter_config, schema)
 
-                            if is_angle or not relative:
-                                resolution = rv[mask] - cv[mask]
+                    # Compute constant MC weight once per sample for agreement plots.
+                    if kind == "data":
+                        mc_weight = 1.0
+                    else:
+                        params_key = (self.sample_config.get(sample) or {}).get("params_key", sample)
+                        mc_weight = compute_mc_weight(params_key, self.params, cache=self._mc_weight_cache)
 
-                                resolution = (resolution + np.pi) % (2 * np.pi) - np.pi
-                            else:
-                                resolution = (rv[mask] - cv[mask]) / cv[mask]
-                            edges = resolution_edges[(c, r)]
-                            counts, _ = np.histogram(resolution, bins=edges)
-                            counts = counts * scale
-                            process = self._sample_to_process(sample)
-                            add_histogram(resolution_hists[(c, r)], process, counts)
+                    self.logger.debug("Columns BEFORE (%s): %s", sample, columns)
+                    columns = [c for c in columns if c in item["schema"]]
+                    self.logger.debug("Columns AFTER  (%s): %s", sample, columns)
 
-                    # MC/Data agreement (OS/SS)
-                    if do_mc_data and present_control and ("os" in schema) and ("os" in batch.schema.names):
-                        os_flag = self._to_numpy(batch, "os")
-
-                        for var in present_control:
-                            values = self._to_numpy(batch, var)
-
-                            for region_name, region_mask in {"OS": os_flag == 1, "SS": os_flag == 0}.items():
-                                mask = region_mask & np.isfinite(values)
+                    for batch in self.data_access.iter_batches(item, columns=columns, filter_expr=filter_expr):
+                        # Control plots
+                        if do_control and present_control:
+                            for var in present_control:
+                                values = self._to_numpy(batch, var)
+                                mask = np.isfinite(values)
                                 if not np.any(mask):
                                     continue
 
                                 edges = control_edges[var]
-                                raw_counts, _ = np.histogram(values[mask], bins=edges)
-                                raw_counts = raw_counts.astype(float)
-                                counts = raw_counts * mc_weight
-                                sumw2 = raw_counts * (mc_weight**2)
-
+                                counts, _ = np.histogram(values[mask], bins=edges)
+                                counts = counts * scale
                                 process = self._sample_to_process(sample)
+                                add_histogram(control_hists[var], process, counts)
 
-                                region = agreement[var][region_name]
+                        # Resolution plots
+                        if do_resolution and present_pairs:
+                            for c, r in present_pairs:
+                                cv = self._to_numpy(batch, c)
+                                rv = self._to_numpy(batch, r)
 
-                                if process not in region:
-                                    region[process] = {
-                                        "counts": np.zeros(len(edges) - 1, dtype=float),
-                                        "sumw2": np.zeros(len(edges) - 1, dtype=float),
-                                    }
+                                mask = np.isfinite(cv) & np.isfinite(rv) & (cv != 0)
+                                if not np.any(mask):
+                                    continue
 
-                                region[process]["counts"] += counts
-                                region[process]["sumw2"] += sumw2
+                                var_cfg = self.variable_config.get(r, {})
 
-            if do_mc_data:
-                self.logger.info("Process kinds (for MC/Data): %s", process_kinds)
+                                is_angle = var_cfg.get("type") == "angle"
+                                relative = var_cfg.get("relative_resolution", True)
 
-            # Render control
-            if do_control:
-                for var, hist in control_hists.items():
-                    if not hist:
-                        continue
-                    out_path = f"plots/control_plots/{var}.png"
-                    save_stacked_plot(
-                        hist,
-                        control_edges[var],
-                        title=f"Control: {var}",
-                        xlabel=var,
-                        out_path=out_path,
-                        get_color=self._get_process_color,
-                        layout=self.layout,
-                    )
+                                if is_angle or not relative:
+                                    resolution = rv[mask] - cv[mask]
 
-                    parquet_path = write_histograms_parquet(
-                        histograms=hist,
-                        edges=control_edges[var],
-                        out_path=out_path,
-                        plot_type="control",
-                        variable=var,
-                    )
+                                    resolution = (resolution + np.pi) % (2 * np.pi) - np.pi
+                                else:
+                                    resolution = (rv[mask] - cv[mask]) / cv[mask]
+                                edges = resolution_edges[(c, r)]
+                                counts, _ = np.histogram(resolution, bins=edges)
+                                counts = counts * scale
+                                process = self._sample_to_process(sample)
+                                add_histogram(resolution_hists[(c, r)], process, counts)
 
-                    self.logger.info("Saved control plot: %s (parquet: %s)", out_path, parquet_path)
+                        # MC/Data agreement (OS/SS)
+                        if do_mc_data and present_control and ("os" in schema) and ("os" in batch.schema.names):
+                            os_flag = self._to_numpy(batch, "os")
 
-            # Render resolution
-            if do_resolution:
-                for (c, r), hist in resolution_hists.items():
-                    if not hist:
-                        continue
-                    out_path = f"plots/resolution_plots/Resolution_{r}_from_{c}.png"
-                    save_stacked_plot(
-                        hist,
-                        resolution_edges[(c, r)],
-                        title=f"Resolution: {r} vs {c}",
-                        xlabel=f"res_{r}",
-                        out_path=out_path,
-                        get_color=self._get_process_color,
-                        layout=self.layout,
-                    )
-                    parquet_path = write_histograms_parquet(
-                        histograms=hist,
-                        edges=resolution_edges[(c, r)],
-                        out_path=out_path,
-                        plot_type="resolution",
-                        variable=f"{r}_from_{c}",
-                    )
-                    self.logger.info("Saved resolution plot: %s (parquet: %s)", out_path, parquet_path)
+                            for var in present_control:
+                                values = self._to_numpy(batch, var)
 
-            # Render agreement
-            if do_mc_data:
-                for var, regions in agreement.items():
-                    # add QCD per-var
-                    histograms = {"OS": regions["OS"], "SS": regions["SS"]}
+                                for region_name, region_mask in {"OS": os_flag == 1, "SS": os_flag == 0}.items():
+                                    mask = region_mask & np.isfinite(values)
+                                    if not np.any(mask):
+                                        continue
 
-                    def _sum_counts(region_dict: dict[str, dict[str, np.ndarray]], *, want_kind: str) -> float:
-                        total = 0.0
-                        for proc_name, h in (region_dict or {}).items():
-                            if process_kinds.get(proc_name, "mc") != want_kind:
-                                continue
-                            total += float(np.sum(h.get("counts", 0.0)))
-                        return total
+                                    edges = control_edges[var]
+                                    raw_counts, _ = np.histogram(values[mask], bins=edges)
+                                    raw_counts = raw_counts.astype(float)
+                                    counts = raw_counts * mc_weight
+                                    sumw2 = raw_counts * (mc_weight**2)
 
-                    data_os = _sum_counts(histograms["OS"], want_kind="data")
-                    data_ss = _sum_counts(histograms["SS"], want_kind="data")
-                    mc_os = _sum_counts(histograms["OS"], want_kind="mc")
-                    mc_ss = _sum_counts(histograms["SS"], want_kind="mc")
+                                    process = self._sample_to_process(sample)
 
-                    if data_os > 0:
-                        self.logger.info(
-                            "MC/Data totals (%s): data(OS=%.3g,SS=%.3g) mc(OS=%.3g,SS=%.3g) mc/data(OS)=%.3g",
-                            var,
-                            data_os,
-                            data_ss,
-                            mc_os,
-                            mc_ss,
-                            mc_os / data_os,
+                                    region = agreement[var][region_name]
+
+                                    if process not in region:
+                                        region[process] = {
+                                            "counts": np.zeros(len(edges) - 1, dtype=float),
+                                            "sumw2": np.zeros(len(edges) - 1, dtype=float),
+                                        }
+
+                                    region[process]["counts"] += counts
+                                    region[process]["sumw2"] += sumw2
+
+                if do_mc_data:
+                    self.logger.info("Process kinds (for MC/Data): %s", process_kinds)
+
+                # Render control
+                if do_control:
+                    for var, hist in control_hists.items():
+                        if not hist:
+                            continue
+                        out_path = f"plots/control_plots/{var}.png"
+                        save_stacked_plot(
+                            hist,
+                            control_edges[var],
+                            title=f"Control: {var}",
+                            xlabel=var,
+                            out_path=out_path,
+                            get_color=self._get_process_color,
+                            layout=self.layout,
                         )
 
-                    add_qcd_from_ss(
-                        histograms,
-                        {"add_qcd_from_ss": True, "qcd_ff": 1.0},
-                        process_kinds,
-                    )
+                        parquet_path = write_histograms_parquet(
+                            histograms=hist,
+                            edges=control_edges[var],
+                            out_path=out_path,
+                            plot_type="control",
+                            variable=var,
+                        )
 
-                    samples = histograms["OS"]
+                        self.logger.info("Saved control plot: %s (parquet: %s)", out_path, parquet_path)
 
-                    data_counts = None
-                    data_sumw2 = None
-                    mc_samples: dict[str, np.ndarray] = {}
-                    mc_sumw2_total = None
+                # Render resolution
+                if do_resolution:
+                    for (c, r), hist in resolution_hists.items():
+                        if not hist:
+                            continue
+                        out_path = f"plots/resolution_plots/Resolution_{r}_from_{c}.png"
+                        save_stacked_plot(
+                            hist,
+                            resolution_edges[(c, r)],
+                            title=f"Resolution: {r} vs {c}",
+                            xlabel=f"res_{r}",
+                            out_path=out_path,
+                            get_color=self._get_process_color,
+                            layout=self.layout,
+                        )
+                        parquet_path = write_histograms_parquet(
+                            histograms=hist,
+                            edges=resolution_edges[(c, r)],
+                            out_path=out_path,
+                            plot_type="resolution",
+                            variable=f"{r}_from_{c}",
+                        )
+                        self.logger.info("Saved resolution plot: %s (parquet: %s)", out_path, parquet_path)
 
-                    for name, hist in samples.items():
-                        if process_kinds.get(name, "mc") == "data":
-                            if data_counts is None:
-                                data_counts = hist["counts"].copy()
-                                data_sumw2 = hist.get("sumw2", hist["counts"]).copy()
+                # Render agreement
+                if do_mc_data:
+                    for var, regions in agreement.items():
+                        # add QCD per-var
+                        histograms = {"OS": regions["OS"], "SS": regions["SS"]}
+
+                        def _sum_counts(region_dict: dict[str, dict[str, np.ndarray]], *, want_kind: str) -> float:
+                            total = 0.0
+                            for proc_name, h in (region_dict or {}).items():
+                                if process_kinds.get(proc_name, "mc") != want_kind:
+                                    continue
+                                total += float(np.sum(h.get("counts", 0.0)))
+                            return total
+
+                        data_os = _sum_counts(histograms["OS"], want_kind="data")
+                        data_ss = _sum_counts(histograms["SS"], want_kind="data")
+                        mc_os = _sum_counts(histograms["OS"], want_kind="mc")
+                        mc_ss = _sum_counts(histograms["SS"], want_kind="mc")
+
+                        if data_os > 0:
+                            self.logger.info(
+                                "MC/Data totals (%s): data(OS=%.3g,SS=%.3g) mc(OS=%.3g,SS=%.3g) mc/data(OS)=%.3g",
+                                var,
+                                data_os,
+                                data_ss,
+                                mc_os,
+                                mc_ss,
+                                mc_os / data_os,
+                            )
+
+                        add_qcd_from_ss(
+                            histograms,
+                            {"add_qcd_from_ss": True, "qcd_ff": 1.0},
+                            process_kinds,
+                        )
+
+                        samples = histograms["OS"]
+
+                        data_counts = None
+                        data_sumw2 = None
+                        mc_samples: dict[str, np.ndarray] = {}
+                        mc_sumw2_total = None
+
+                        for name, hist in samples.items():
+                            if process_kinds.get(name, "mc") == "data":
+                                if data_counts is None:
+                                    data_counts = hist["counts"].copy()
+                                    data_sumw2 = hist.get("sumw2", hist["counts"]).copy()
+                                else:
+                                    data_counts += hist["counts"]
+                                    data_sumw2 += hist.get("sumw2", hist["counts"])
                             else:
-                                data_counts += hist["counts"]
-                                data_sumw2 += hist.get("sumw2", hist["counts"])
-                        else:
-                            mc_samples[name] = hist["counts"].copy()
-                            sumw2 = hist.get("sumw2")
-                            if sumw2 is None:
-                                continue
-                            if mc_sumw2_total is None:
-                                mc_sumw2_total = sumw2.copy()
-                            else:
-                                mc_sumw2_total += sumw2
+                                mc_samples[name] = hist["counts"].copy()
+                                sumw2 = hist.get("sumw2")
+                                if sumw2 is None:
+                                    continue
+                                if mc_sumw2_total is None:
+                                    mc_sumw2_total = sumw2.copy()
+                                else:
+                                    mc_sumw2_total += sumw2
 
-                    if data_counts is None or not mc_samples:
-                        continue
+                        if data_counts is None or not mc_samples:
+                            continue
 
-                    data_unc = None
-                    if data_sumw2 is not None:
-                        data_unc = np.sqrt(np.maximum(data_sumw2, 0.0))
+                        data_unc = None
+                        if data_sumw2 is not None:
+                            data_unc = np.sqrt(np.maximum(data_sumw2, 0.0))
 
-                    mc_total_unc = None
-                    if mc_sumw2_total is not None:
-                        mc_total_unc = np.sqrt(np.maximum(mc_sumw2_total, 0.0))
+                        mc_total_unc = None
+                        if mc_sumw2_total is not None:
+                            mc_total_unc = np.sqrt(np.maximum(mc_sumw2_total, 0.0))
 
-                    out_path = f"plots/mc_data_plots/MC_vs_Data_{var}.png"
-                    save_data_mc_ratio_plot(
-                        bin_edges=control_edges[var],
-                        data_counts=data_counts,
-                        mc_samples=mc_samples,
-                        data_unc=data_unc,
-                        mc_total_unc=mc_total_unc,
-                        out_path=out_path,
-                        xlabel=var,
-                        get_color=self._get_process_color,
-                    )
-                    combined = {"data": data_counts, **mc_samples}
+                        out_path = f"plots/mc_data_plots/MC_vs_Data_{var}.png"
+                        save_data_mc_ratio_plot(
+                            bin_edges=control_edges[var],
+                            data_counts=data_counts,
+                            mc_samples=mc_samples,
+                            data_unc=data_unc,
+                            mc_total_unc=mc_total_unc,
+                            out_path=out_path,
+                            xlabel=var,
+                            get_color=self._get_process_color,
+                        )
+                        combined = {"data": data_counts, **mc_samples}
 
-                    parquet_path = write_histograms_parquet(
-                        histograms=combined,
-                        edges=control_edges[var],
-                        out_path=out_path,
-                        plot_type="mc_data",
-                        variable=var,
-                    )
+                        parquet_path = write_histograms_parquet(
+                            histograms=combined,
+                            edges=control_edges[var],
+                            out_path=out_path,
+                            plot_type="mc_data",
+                            variable=var,
+                        )
 
-                    self.logger.info("Saved MC/Data plot: %s (parquet: %s)", out_path, parquet_path)
+                        self.logger.info("Saved MC/Data plot: %s (parquet: %s)", out_path, parquet_path)
         else:
             self.logger.warning("There is no mode like that!")
