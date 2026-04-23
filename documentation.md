@@ -406,27 +406,236 @@
             - title,
             - tight layout for clean output;
 
-    4. 
+    4. Output
+        Plots are saved as: plt.savefig(out_path);
+        Typically:
+            - PNG format,
+            - stored in plots/ directories;
+
+    5. MC vs Data plotting
+        save_data_mc_ratio_plot(...)
+        Used for:
+            - Data vs MC comparisons,
+            - validation plots,
+            - final physics outputs;
+        Structure of the plot. The figure consists of two panels:
+            a. Top panel:
+                - stacked MC histograms,
+                - data points,
+                - MC uncertainty band;
+            b. Bottom panel (ratio = Data/MC):
+                - Data / MC ratio,
+                - uncertainty bands,
+                - reference line at 1.0;
+    
+    6. Inputs
+        - bin_edges - Histogram bin edges,
+        - data_counts - Data histogram,
+        - mc_samples - Dictionary of MC histograms,
+        - data_unc - Data uncertainties,
+        - mc_total_unc - MC uncertainties,
+        - xlabel - X-axis label,
+        - out_path - Output file;
+
+    7. Uncertainty handling
+        If not provided:
+            - Data uncertainty: sqrt(N),
+            - MC uncertainty: sqrt(N);
+        Visualization
+            - MC uncertainty - hatched band,
+            - Data - error bars,
+            - Ratio uncertainty - propagated;
+
+    8. Special handling (QCD)
+        - QCD is rendered in gray,
+        - labeled as: QCD (from SS);
+    
+    9. Plot styling details
+        - consistent binning,
+        - shared X-axis (main + ratio panel),
+        - automatic scaling,
+        - ratio range fixed to: [0.5, 1.5];
+
+    10. Summary
+        render.py is responsible for turning histogram data into final physics plots.
+        It provides:
+            - flexible layouts(stacked / overlay / side-by-side),
+            - high-quality Data vs MC comparisons,
+            - uncertainty visualization,
+            - consistent styling across all outputs;
 
 ## `selection.py`
-    Responsible for filtering datasets and selecting variables.
-    Used before plotting.
+    The selection.py module is responsible for filtering datasets before plotting.
+    It applies physics-based selection cuts to ensure that only relevant events are processed.
 
-### Main functions:
-    - **selection_columns_used()**
-    - **selection_mask()**
-    - **make_selector()**
-    - **make_arrow_filter()**
-    - **SELECT()**
-    - **plotting_columns()**
+    Purpose - This module handles:
+        - applying selection criteria,
+        - determining required columns,
+        - building efficient filters for large datasets,
+        - ensuring consistency of selection across the pipeline;
+
+    1. Selection configuration
+        Selection cuts are defined in:
+            Configurations/<config_name>/plotter.yaml;
+
+        Example:
+            selection:
+                pt_1_min: 25
+                pt_2_min: 20
+                eta_1_abs_max: 2.3
+                iso_1_max: 0.15;
+
+    2. Supported selection cuts
+        - pt_1_min → pt_1 > value,
+        - pt_2_min → pt_2 > value,
+        - eta_1_abs_max → |eta_1| < value,
+        - eta_2_abs_max → |eta_2| < value,
+        - decayModePNet_2_eq → exact match,
+        - idDeepTau2018v2p5VSjet_2_min → ≥ value,
+        - idDeepTau2018v2p5VSe_2_min → ≥ value,
+        - idDeepTau2018v2p5VSmu_2_min → ≥ value,
+        - iso_1_max → < value,
+        - ip_LengthSig_1_abs_min → |value| > threshold;
+
+    3. Main functions
+        selection_columns_used(...) - Used for:
+            - identifying which columns are needed for selection,
+            - minimizing data loading;
+
+        selection_mask(...) - Used for:
+            - creating a boolean mask for pandas DataFrames,
+            - applying all selection cuts at once;
+
+        make_selector(...) - Used for:
+            - generating a reusable selection function,
+            - applying selection in modular workflows;
+
+        make_arrow_filter(...) - Used for:
+            - building a pyarrow filter expression,
+            - filtering data before loading into memory;
+            --critical for performance on large datasets
+
+        SELECT(...) - Used for:
+            - quick selection on a DataFrame or parquet file,
+            - simple standalone usage;
+
+        plotting_columns(...) - Used for:
+            - determining available columns for plotting,
+            - separating control and resolution variables;
+
+    4. Filtering modes
+        a. Pandas filtering:
+            - uses selection_mask,
+            - operates on in-memory DataFrames;
+
+        b. PyArrow filtering:
+            - uses make_arrow_filter,
+            - applied during file reading,
+            - reduces I/O and memory usage;
+            --recommended for large datasets
+
+    5. Behavior
+        - all selection conditions are combined using logical AND,
+        - missing columns are ignored safely,
+        - if no selection is defined → all events are used;
+
+    6. Performance features
+        - loads only necessary columns,
+        - supports early filtering (before data loading),
+        - compatible with batch processing;
+
+    7. Summary
+        selection.py is responsible for filtering input data before plotting.
+        It ensures:
+            - consistent selection logic,
+            - efficient data processing,
+            - compatibility with both pandas and pyarrow workflows;
 
 ## `qcd.py`
-    Used for QCD background estimation with the SS method.
+    The qcd.py module is responsible for estimating the QCD background using the SS (Same-Sign) method.
+    It derives the QCD contribution directly from data and propagates it to the OS (Opposite-Sign) region.
 
-    Workflow:
-    1. Build QCD template in SS region.
-    2. Subtract MC background from data.
-    3. Scale result to OS region.
+    Purpose - This module handles:
+        - QCD background estimation,
+        - subtraction of MC from data,
+        - propagation of QCD from SS to OS,
+        - uncertainty calculation;
+
+    1. Main function
+        add_qcd_from_ss(...)
+        Used for:
+            - estimating QCD contribution from SS region,
+            - adding QCD as an additional process to histograms;
+
+    2. Method (SS → OS)
+        The QCD estimation follows: QCD (SS) = Data (SS) - MC (SS)
+        Then propagated to OS: QCD (OS) = QCD (SS) × qcd_ff
+
+        where:
+            - SS = Same-Sign region,
+            - OS = Opposite-Sign region,
+            - qcd_ff = transfer (fake factor);
+
+    3. Inputs
+        - histograms:
+            Structure:
+                {
+                    "SS": {sample: {"counts": ..., "sumw2": ...}},
+                    "OS": {sample: {"counts": ..., "sumw2": ...}}
+                }
+
+        - config:
+            {
+                "add_qcd_from_ss": True/False,
+                "qcd_ff": float
+            }
+
+        - sample_kinds:
+            Dictionary mapping sample → type:
+                - "data"
+                - "mc"
+
+    4. Workflow
+        Step 1: identify data samples in SS region;
+
+        Step 2: sum all data histograms;
+
+        Step 3: sum all MC histograms (excluding QCD);
+
+        Step 4: compute QCD in SS: QCD = Data - MC;
+
+        Step 5: compute uncertainties: sumw2 = data_sumw2 + mc_sumw2;
+
+        Step 6: store QCD in SS region;
+
+        Step 7: scale QCD to OS using qcd_ff;
+
+    5. Output
+        The function modifies input histograms in-place:
+            SS["QCD"] → raw QCD estimate  
+            OS["QCD"] → scaled QCD estimate  
+
+    6. Behavior and safeguards
+        - if add_qcd_from_ss is False → function does nothing,
+        - if no data samples are found → warning is printed,
+        - if no MC samples are found → warning is printed,
+        - QCD sample is excluded from MC subtraction;
+
+    7. Uncertainty handling
+        - uncertainties are propagated as: sumw2 = sumw2_data + sumw2_mc,
+        - scaling to OS: sumw2_OS = sumw2_SS × (qcd_ff)^2;
+
+    8. Notes
+        - no additional normalization between SS and OS is applied,
+        - method assumes SS region is QCD-dominated,
+        - widely used in physics analyses for data-driven background estimation;
+
+    9. Summary
+        qcd.py provides a simple and robust way to estimate QCD background.
+        It:
+            - derives QCD directly from data,
+            - avoids MC modeling of QCD,
+            - integrates seamlessly with MC/Data comparison plots.
 
 # 4. Configurations Directory
     All user configurations are stored in folder:
