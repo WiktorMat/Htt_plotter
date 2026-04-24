@@ -81,6 +81,53 @@ def draw_track(ax, origin, direction, length=1.0, color="cyan", lw=2):
     )
     return end
 
+def draw_detector_cylinder(ax, radius=2.0, length=4.0, alpha=0.05, color='cyan'):
+    z = np.linspace(-length/2, length/2, 50)
+    theta = np.linspace(0, np.pi, 50)
+    theta_grid, z_grid = np.meshgrid(theta, z)
+    
+    x_grid = radius * np.cos(theta_grid)
+    y_grid = radius * np.sin(theta_grid)
+    
+    ax.plot_surface(x_grid, y_grid, z_grid, alpha=alpha, color=color, linewidth=0, antialiased=True)
+    
+    t = np.linspace(0, 2*np.pi, 100)
+    ax.plot(radius*np.cos(t), radius*np.sin(t), length/2, color=color, alpha=alpha*2, lw=0.5)
+    ax.plot(radius*np.cos(t), radius*np.sin(t), -length/2, color=color, alpha=alpha*2, lw=0.5)
+
+def draw_cone(ax, origin, direction, length=1.0, radius=0.1, color="cyan", alpha=0.5):
+    n = 20
+    u = np.linspace(0, length, n)
+    v = np.linspace(0, 2 * np.pi, n)
+    U, V = np.meshgrid(u, v)
+
+    X = (radius * U / length) * np.cos(V)
+    Y = (radius * U / length) * np.sin(V)
+    Z = U
+
+    dir_norm = direction / np.linalg.norm(direction)
+    
+    z_axis = np.array([0, 0, 1])
+    if np.allclose(dir_norm, z_axis):
+        R = np.eye(3)
+    elif np.allclose(dir_norm, -z_axis):
+        R = -np.eye(3)
+    else:
+        v_rot = np.cross(z_axis, dir_norm)
+        s = np.linalg.norm(v_rot)
+        c = np.dot(z_axis, dir_norm)
+        vx = np.array([[0, -v_rot[2], v_rot[1]], [v_rot[2], 0, -v_rot[0]], [-v_rot[1], v_rot[0], 0]])
+        R = np.eye(3) + vx + np.matmul(vx, vx) * ((1 - c) / (s**2))
+
+    stack = np.stack([X.flatten(), Y.flatten(), Z.flatten()])
+    rotated = np.dot(R, stack)
+    
+    X = rotated[0, :].reshape(n, n) + origin[0]
+    Y = rotated[1, :].reshape(n, n) + origin[1]
+    Z = rotated[2, :].reshape(n, n) + origin[2]
+
+    return ax.plot_surface(X, Y, Z, color=color, alpha=alpha, linewidth=0, antialiased=True)
+
 def extract_pions(event, suffix):
     pions = []
     base_names = ["pi", "pi2", "pi3", "pi0"]
@@ -124,6 +171,8 @@ def plot_events(events, sample_names, elev=20, azim=45, save_path=None):
     ax.set_facecolor("black")
     fig.patch.set_facecolor("black")
     
+    draw_detector_cylinder(ax, radius=2.0, length=4.0, alpha=0.2, color='deepskyblue')
+    
     origin = np.array([0, 0, 0])
     has_muon = False
     has_tau = False
@@ -138,15 +187,16 @@ def plot_events(events, sample_names, elev=20, azim=45, save_path=None):
         def draw_logic(ax, start, direction, pions):
             nonlocal has_muon, has_tau
             if not pions:
-                draw_track(ax, start, direction, length=1.8, color="#00FFFF", lw=2.5)
+                draw_cone(ax, start, direction, length=1.8, radius=0.05, color="#00FFFF", alpha=0.6)
                 has_muon = True
             else:
-                tau_end = draw_track(ax, start, direction, length=0.4, color="white", lw=4)
+                tau_end = start + (direction / np.linalg.norm(direction)) * 0.4
+                draw_cone(ax, start, direction, length=0.4, radius=0.08, color="white", alpha=0.8)
+                
                 for p in pions:
-                    p_norm = np.linalg.norm(p["p"])
-                    dyn_length = 0.5 + np.log1p(p_norm) * 0.2
                     color = "lime" if "pi0" not in p["type"] else "magenta"
-                    draw_track(ax, tau_end, p["p"], length=dyn_length, color=color, lw=1.5)
+                    p_vec = p["p"]
+                    draw_cone(ax, tau_end, p_vec, length=1.2, radius=0.15, color=color, alpha=0.4)
                 has_tau = True
 
         draw_logic(ax, origin, tau1_dir, pions1)
@@ -154,7 +204,7 @@ def plot_events(events, sample_names, elev=20, azim=45, save_path=None):
 
     limit = 2
     ax.set_xlim([-limit, limit]); ax.set_ylim([-limit, limit]); ax.set_zlim([-limit, limit])
-    ax.set_xlabel("X [j.u.]", color="white"); ax.set_ylabel("Y [j.u.]", color="white"); ax.set_zlabel("Z [j.u.]", color="white")
+    ax.set_xlabel("X", color="white"); ax.set_ylabel("Y", color="white"); ax.set_zlabel("Z", color="white")
     ax.tick_params(colors='white')
 
     particle_lines = []
