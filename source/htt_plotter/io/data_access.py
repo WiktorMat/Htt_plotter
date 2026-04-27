@@ -62,8 +62,14 @@ class DataAccess:
 
     def _infer_format(self, files: list[Path]) -> str:
         if not files:
-            raise ValueError("No files")
-        suffixes = {p.suffix.lower() for p in files}
+            files = [Path(f) for f in files if f]
+            if not files:
+                self.logger.warning("Empty file list after cleaning → fallback to 'unknown'")
+                return "unknown"
+            if len(suffixes) != 1:
+                self.logger.warning("Mixed file types → fallback to first file type")
+                return next(iter(suffixes))
+        suffixes = {Path(p).suffix.lower() for p in files if p}
         if len(suffixes) != 1:
             raise ValueError(f"Mixed file types not supported: {sorted(suffixes)}")
         s = next(iter(suffixes))
@@ -90,6 +96,16 @@ class DataAccess:
                     import pyarrow.parquet as pq
 
                     schema = list(pq.read_schema(files[0]).names)
+                    if not files:
+                        self.logger.warning("No files for schema → returning empty schema")
+                        return []
+                    
+                    try:
+                        schema = list(pq.read_schema(files[0]).names)
+                    except Exception as e:
+                        self.logger.warning("Schema read failed → %s", e)
+                        return []
+                    
                     try_store_cached_schema(
                         schema_cache_dir=self.schema_cache_dir,
                         sample=sample,
@@ -147,8 +163,15 @@ class DataAccess:
           the consumer (main) thread.
         """
 
-        fmt = index_item["format"]
-        files: list[Path] = index_item["files"]
+        fmt = index_item.get("format")
+        files = index_item.get("files", [])
+
+        if not fmt:
+            raise ValueError(f"Missing format in index_item: {index_item}")
+
+        if not files:
+            self.logger.warning("Empty file list for sample=%s → skipping", index_item.get("sample"))
+            return
 
         if fmt == "parquet":
             import pyarrow.dataset as ds
@@ -156,6 +179,9 @@ class DataAccess:
             cache_key = index_item["sample"]
 
             def _file_chunks(all_files: list[Path]) -> list[list[Path]]:
+                all_files = [p for p in all_files if p]
+                if not all_files:
+                    return [[]]
                 if self.max_files_per_dataset is None or self.max_files_per_dataset <= 0:
                     return [all_files]
                 if len(all_files) <= self.max_files_per_dataset:
@@ -182,7 +208,10 @@ class DataAccess:
                 and len(file_chunks) == 1
             )
             if use_cache:
-                dataset = self._dataset_cache.get(cache_key)
+                if dataset is not None and not hasattr(dataset, "scanner"):
+                    self.logger.warning("Corrupted cache entry for %s → dropping", cache_key)
+                    dataset = None
+                    self._dataset_cache.pop(cache_key, None)
                 if dataset is not None:
                     self._dataset_cache.move_to_end(cache_key)
 
@@ -220,12 +249,22 @@ class DataAccess:
                             while len(self._dataset_cache) > self.max_cached_datasets:
                                 self._dataset_cache.popitem(last=False)
 
-                    scanner = dataset.scanner(
-                        columns=columns,
-                        filter=filter_expr,
-                        use_threads=True,
-                        batch_size=batch_size,
-                    )
+                    try:
+                        scanner = dataset.scanner(
+                            columns=columns,
+                            filter=filter_expr,
+                            use_threads=True,
+                            batch_size=batch_size,
+                        )
+                    except Exception as e:
+                        failed_files = 0
+                        failed_files += 1
+                        self.logger.error("Scanner failed for %s → %s", cache_key, e)
+                        return
+                
+                if failed_files == len(files):
+                    self.logger.error("All CSV files failed → returning empty dataset")
+                    return
 
                     if len(file_chunks) > 1:
                         yield (
@@ -240,6 +279,9 @@ class DataAccess:
                         )
 
                     for batch in scanner.to_batches():
+                        if batch is None:
+                            self.logger.warning("Null batch in %s → skipping", cache_key)
+                            continue
                         batch_ready = time.perf_counter()
                         io_time_s += batch_ready - resume_time
 
@@ -336,7 +378,11 @@ class DataAccess:
 
                 for p in files:
                     read_t0 = time.perf_counter()
-                    df = pd.read_csv(p, usecols=columns)
+                    try:
+                        df = pd.read_csv(p, usecols=columns)
+                    except Exception as e:
+                        self.logger.warning("CSV read failed %s → %s", p, e)
+                        continue
                     dt = time.perf_counter() - read_t0
                     self._table_read_count += 1
 

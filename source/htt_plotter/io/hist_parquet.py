@@ -30,6 +30,9 @@ def write_histograms_parquet(
     parquet_path = out_path.with_suffix(".parquet")
 
     edges_list = np.asarray(edges, dtype=float).tolist()
+    
+    if edges is None or len(edges) == 0:
+        raise ValueError("edges is empty")
 
     samples: list[str] = []
     plot_types: list[str] = []
@@ -42,6 +45,9 @@ def write_histograms_parquet(
         plot_types.append(plot_type)
         variables.append(variable)
         arr = np.asarray(counts, dtype=float)
+
+        if arr.size == 0:
+            arr = np.zeros(len(edges) - 1, dtype=float)
 
         if arr.ndim == 0:
             arr = np.array([], dtype=float)
@@ -80,8 +86,14 @@ def read_histograms_parquet(
     Returns (plot_type, variable, edges, hist_dict) or None if file is empty.
     """
 
-    table = pq.read_table(file_path)
+    try:
+        table = pq.read_table(file_path)
+    except Exception as e:
+        print("[WARN] Failed to read parquet %s → %s", file_path, e)
+        return None
+
     if table.num_rows == 0:
+        print("[WARN] Empty histogram parquet: %s", file_path)
         return None
 
     plot_type = table.column("plot_type")[0].as_py()

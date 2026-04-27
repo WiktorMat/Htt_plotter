@@ -117,8 +117,18 @@ def save_data_mc_ratio_plot(
     bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
 
     total_mc = np.zeros_like(data_counts)
-    for vals in mc_samples.values():
+
+    for name, vals in mc_samples.items():
+        vals = np.asarray(vals)
+
+        if vals.shape != total_mc.shape:
+            vals = np.zeros_like(total_mc)
+
         total_mc += vals
+
+    if mc_samples is None or len(mc_samples) == 0:
+        total_mc = np.zeros_like(data_counts)
+        mc_samples = {"MC": total_mc.copy()}
 
     if np.all(total_mc == 0):
         return
@@ -134,7 +144,10 @@ def save_data_mc_ratio_plot(
     # Draw order is taken from the insertion order of `mc_samples`.
     # (The Plotter can pre-order it e.g. according to process.json.)
     for name, vals in mc_samples.items():
-        color = "green" if name.lower() == "qcd" else get_color(name)
+        try:
+            color = "green" if name.lower() == "qcd" else get_color(name)
+        except Exception:
+            color = "gray"
         label = "QCD (from SS)" if name.lower() == "qcd" else name
 
         ax.bar(
@@ -195,11 +208,13 @@ def save_data_mc_ratio_plot(
     ax.set_ylabel("Events")
     ax.legend()
 
+    total_mc_safe = np.where(total_mc == 0, np.nan, total_mc)
+
     ratio = np.divide(
         data_counts,
-        total_mc,
+        total_mc_safe,
         out=np.zeros_like(data_counts, dtype=float),
-        where=total_mc != 0,
+        where=~np.isnan(total_mc_safe),
     )
 
     ratio_unc = np.divide(

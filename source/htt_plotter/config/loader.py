@@ -6,6 +6,27 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+def safe_load_json(path: Path, default):
+    if not path.exists():
+        logger.warning("Missing file: %s → using default", path)
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning("Failed loading %s → %s", path, e)
+        return default
+    
+def safe_load_yaml(path: Path, default):
+    if not path.exists():
+        logger.warning("Missing file: %s → using default", path)
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or default
+    except Exception as e:
+        logger.warning("Failed loading %s → %s", path, e)
+        return default
 
 def load_configs(project_root: Path, config_name: str = "config_0"):
     project_root = Path(project_root)
@@ -34,22 +55,21 @@ def load_configs(project_root: Path, config_name: str = "config_0"):
     logger.info("[PLOTTER]: %s", plotter_path)
     logger.info("[PROCESS]: %s", process_path)
 
-    with open(files_path, "r", encoding="utf-8") as f:
-        raw = json.load(f)
+    raw = safe_load_json(files_path, default={"samples": {}})
 
     sample_config = raw.get("samples", raw)
 
-    with open(process_path, "r", encoding="utf-8") as f:
-        process_config = json.load(f)
+    process_config = safe_load_json(process_path, default={})
 
-    with open(params_path, "r", encoding="utf-8") as f:
-        params = yaml.safe_load(f) or {}
+    params = safe_load_yaml(params_path, default={})
 
-    with open(variables_path, "r", encoding="utf-8") as f:
-        variable_config = json.load(f)
+    if "lumi" not in params:
+        logger.warning("Missing 'lumi' in params.yaml → default = 1.0")
+        params["lumi"] = 1.0
 
-    with open(plotter_path, "r", encoding="utf-8") as f:
-        plotter_config = yaml.safe_load(f) or {}
+    variable_config = safe_load_json(variables_path, default={})
+
+    plotter_config = safe_load_yaml(plotter_path, default={})
 
     # Selection is sourced from Config.py (single source of truth)
     selection_from_config: dict[str, float | int] = {}
@@ -74,23 +94,28 @@ def load_configs(project_root: Path, config_name: str = "config_0"):
             value = getattr(cfg, attr, None)
             if value is not None:
                 selection_from_config[key] = value
+    else:
+        logger.warning("Config.py not found → using empty selection")
+        selection_from_config = {}
 
     plotter_config["selection"] = selection_from_config
     plotter_config.setdefault("plotting", {})
     plotting = plotter_config["plotting"]
+
+    if not isinstance(plotting, dict):
+        logger.warning("plotting section corrupted → resetting")
+        plotter_config["plotting"] = {}
+        plotting = plotter_config["plotting"]
 
     plotting.setdefault("control", [])
     plotting.setdefault("resolution", [])
 
     cleaned_resolution = []
     for item in plotting["resolution"]:
-        if isinstance(item, (list, tuple)) and len(item) == 2:
-            cleaned_resolution.append(tuple(item))
-        else:
-            logger.warning(
-                "Invalid resolution entry skipped: %s (expected [c, r])",
-                item,
-            )
+        try:
+            cleaned_resolution.append((item[0], item[1]))
+        except Exception:
+            logger.warning("Invalid resolution entry skipped: %s", item)
 
     plotting["resolution"] = cleaned_resolution
 
