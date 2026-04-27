@@ -72,6 +72,14 @@ class Plotter:
             self.process_config,
         ) = load_configs(self.project_root, self.config_name)
 
+        configs = load_configs(self.project_root, self.config_name)
+
+        self.sample_config = configs[0] or {}
+        self.params = configs[1] or {}
+        self.variable_config = configs[2] or {}
+        self.plotter_config = configs[3] or {}
+        self.process_config = configs[4] or {}
+
         self.logger = logging.getLogger(__name__)
 
         self.sample_to_process = self._build_sample_to_process_map()
@@ -82,18 +90,16 @@ class Plotter:
 
         runtime = dict(self.plotter_config.get("plotter_runtime") or {})
 
-        if xlim_control is not None:
-            runtime["xlim_control"] = xlim_control
-        if xlim_resolution is not None:
-            runtime["xlim_resolution"] = xlim_resolution
-        if bins is not None:
-            runtime["bins"] = bins
-        if alpha is not None:
-            runtime["alpha"] = alpha
-        if layout is not None:
-            runtime["layout"] = layout
-        if mode is not None:
-            runtime["mode"] = mode
+        runtime_cfg = self.plotter_config.get("plotter_runtime") or {}
+
+        runtime = {
+            "xlim_control": runtime_cfg.get("xlim_control", 100),
+            "xlim_resolution": runtime_cfg.get("xlim_resolution", 50),
+            "bins": runtime_cfg.get("bins", 20),
+            "alpha": runtime_cfg.get("alpha", 1.0),
+            "layout": runtime_cfg.get("layout", "stacked"),
+            "mode": runtime_cfg.get("mode", "raw"),
+        }
 
         self.xlim_ctrl = runtime.get("xlim_control", 100)
         self.xlim_resol = runtime.get("xlim_resolution", 50)
@@ -138,10 +144,10 @@ class Plotter:
 
 
     def _sample_to_process(self, sample: str) -> str:
-        return self.sample_to_process.get(sample, sample)
+        return self.sample_to_process.get(sample, "unknown")
 
     def _get_process_color(self, process: str) -> str:
-        return self.process_colors.get(process, "black")
+        return self.process_colors.get(process, "#999999")
 
     def load_index(self) -> None:
         self.index = self.data_access.build_index()
@@ -157,6 +163,10 @@ class Plotter:
             available_cols |= set(item.get("schema", set()))
 
         self.contr_name = [v for v in desired_control if v in available_cols]
+
+        if not self.contr_name:
+            self.logger.warning("No valid control vars found → falling back to defaults")
+            self.contr_name = list(available_cols)[:2]
 
         self.resolution_pairs = []
 
@@ -577,7 +587,12 @@ class Plotter:
                                 if not np.any(mask):
                                     continue
 
-                                edges = control_edges[var]
+                                edges = control_edges.get(var)
+
+                                if edges is None or len(edges) < 2:
+                                    self.logger.warning(f"No valid binning for {var}, skipping")
+                                    continue
+                                
                                 counts, _ = np.histogram(values[mask], bins=edges)
                                 counts = counts * scale
                                 process = self._sample_to_process(sample)

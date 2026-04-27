@@ -1,0 +1,35 @@
+{
+  "m_vis": {
+    "x_min": 0,
+    "x_max": 200,
+    "bin_width": 5
+  },
+  "mt_tot": {
+    "x_min": 0,
+    "x_max": 200,
+    "bin_width": 5
+  },
+
+  "eta_1": {
+    "x_min": -2.5,
+    "x_max": 2.5,
+    "bin_width": 0.1
+  },
+
+  "pt_1": {
+    "x_min": 20,
+    "x_max": 120,
+    "bin_width": 2.5
+  },
+  "pt_2": {
+    "x_min": 20,
+    "x_max": 120,
+    "bin_width": 2.5
+  },
+
+  "iso_1": {
+    "x_min": 0,
+    "x_max": 0.2,
+    "bin_width": 0.01
+  }
+}

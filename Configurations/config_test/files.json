@@ -1,0 +1,219 @@
+{
+    "DYto2E-2Jets_Bin-0J-MLL-50": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/DYto2E-2Jets_Bin-0J-MLL-50/nominal/Higgs.csv"
+        ]
+    },
+    "DYto2E-2Jets_Bin-1J-MLL-50": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/DYto2E-2Jets_Bin-1J-MLL-50/nominal/Higgs.csv"
+        ]
+    },
+    "DYto2E-2Jets_Bin-2J-MLL-50": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/DYto2E-2Jets_Bin-2J-MLL-50/nominal/Higgs.csv"
+        ]
+    },
+    "DYto2Mu-2Jets_Bin-0J-MLL-50": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/DYto2Mu-2Jets_Bin-0J-MLL-50/nominal/Higgs.csv"
+        ]
+    },
+    "DYto2Mu-2Jets_Bin-1J-MLL-50": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/DYto2Mu-2Jets_Bin-1J-MLL-50/nominal/Higgs.csv"
+        ]
+    },
+    "DYto2Mu-2Jets_Bin-2J-MLL-50": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/DYto2Mu-2Jets_Bin-2J-MLL-50/nominal/Higgs.csv"
+        ]
+    },
+    "DYto2Tau-2Jets_Bin-0J-MLL-50": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/DYto2Tau-2Jets_Bin-0J-MLL-50/nominal/Z0.csv"
+        ]
+    },
+    "DYto2Tau-2Jets_Bin-1J-MLL-50": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/DYto2Tau-2Jets_Bin-1J-MLL-50/nominal/Z0.csv"
+        ]
+    },
+    "DYto2Tau-2Jets_Bin-2J-MLL-50": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/DYto2Tau-2Jets_Bin-2J-MLL-50/nominal/Z0.csv"
+        ]
+    },
+    "Muon0": {
+        "kind": "data",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/Muon0/nominal/H0.csv"
+        ]
+    },
+    "Muon1": {
+        "kind": "data",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/Muon1/nominal/H0.csv"
+        ]
+    },
+    "TbarBQtoLNu-t-channel-4FS": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/TbarBQtoLNu-t-channel-4FS/nominal/H0.csv"
+        ]
+    },
+    "TbarWplusto2L2Nu": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/TbarWplusto2L2Nu/nominal/H0.csv"
+        ]
+    },
+    "TbarWplustoLNu2Q": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/TbarWplustoLNu2Q/nominal/H0.csv"
+        ]
+    },
+    "TBbarQtoLNu-t-channel-4FS": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/TBbarQtoLNu-t-channel-4FS/nominal/H0.csv"
+        ]
+    },
+    "TTto2L2Nu": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/TTto2L2Nu/nominal/H0.csv"
+        ]
+    },
+    "TTto4Q": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/TTto4Q/nominal/H0.csv"
+        ]
+    },
+    "TTtoLNu2Q": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/TTtoLNu2Q/nominal/H0.csv"
+        ]
+    },
+    "TWminusto2L2Nu": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/TWminusto2L2Nu/nominal/H0.csv"
+        ]
+    },
+    "TWminustoLNu2Q": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/TWminustoLNu2Q/nominal/Higgs.csv"
+        ]
+    },
+    "WtoENu-2Jets": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/WtoENu-2Jets/nominal/Ziggs.csv"
+        ]
+    },
+    "WtoMuNu-2Jets": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/WtoMuNu-2Jets/nominal/Ziggs.csv"
+        ]
+    },
+    "WtoTauNu-2Jets": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/WtoTauNu-2Jets/nominal/Ziggs.csv"
+        ]
+    },
+    "WWto2L2Nu": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/WWto2L2Nu/nominal/Ziggs.csv"
+        ]
+    },
+    "WWto4Q": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/WWto4Q/nominal/Ziggs.csv"
+        ]
+    },
+    "WWtoLNu2Q": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/WWtoLNu2Q/nominal/Ziggs.csv"
+        ]
+    },
+    "WZ": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/WZ/nominal/Z0.csv"
+        ]
+    },
+    "WZto2L2Q": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/WZto2L2Q/nominal/Ziggs.csv"
+        ]
+    },
+    "ZZ": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/ZZ/nominal/Z0.csv"
+        ]
+    },
+    "ZZto2L2Nu": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/ZZto2L2Nu/nominal/Z0.csv"
+        ]
+    },
+    "ZZto2L2Q": {
+        "kind": "mc",
+        "scale": 1.0,
+        "files": [
+            "data/output/test/Run3_2024/mt/ZZto2L2Q/nominal/Z0.csv"
+        ]
+    }
+}

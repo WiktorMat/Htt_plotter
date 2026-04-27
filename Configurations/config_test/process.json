@@ -1,0 +1,58 @@
+{
+    "DY": {
+        "samples": [
+            "DYto2E-2Jets_Bin-0J-MLL-50",
+            "DYto2E-2Jets_Bin-1J-MLL-50",
+            "DYto2E-2Jets_Bin-2J-MLL-50",
+            "DYto2Mu-2Jets_Bin-0J-MLL-50",
+            "DYto2Mu-2Jets_Bin-1J-MLL-50",
+            "DYto2Mu-2Jets_Bin-2J-MLL-50",
+            "DYto2Tau-2Jets_Bin-0J-MLL-50",
+            "DYto2Tau-2Jets_Bin-1J-MLL-50",
+            "DYto2Tau-2Jets_Bin-2J-MLL-50"
+        ],
+        "color": "tab:blue"
+    },
+    "W+jets": {
+        "samples": [
+            "WtoENu-2Jets",
+            "WtoMuNu-2Jets",
+            "WtoTauNu-2Jets"
+        ],
+        "color": "tab:orange"
+    },
+    "data": {
+        "samples": [
+            "Muon0",
+            "Muon1"
+        ],
+        "color": "tab:green"
+    },
+    "others": {
+        "samples": [
+            "WWto2L2Nu",
+            "WWto4Q",
+            "WWtoLNu2Q",
+            "WZ",
+            "WZto2L2Q",
+            "ZZ",
+            "ZZto2L2Nu",
+            "ZZto2L2Q"
+        ],
+        "color": "tab:red"
+    },
+    "tt": {
+        "samples": [
+            "TbarBQtoLNu-t-channel-4FS",
+            "TbarWplusto2L2Nu",
+            "TbarWplustoLNu2Q",
+            "TBbarQtoLNu-t-channel-4FS",
+            "TTto2L2Nu",
+            "TTto4Q",
+            "TTtoLNu2Q",
+            "TWminusto2L2Nu",
+            "TWminustoLNu2Q"
+        ],
+        "color": "tab:purple"
+    }
+}

@@ -1,0 +1,25 @@
+plotting:
+  control:
+    - trueMETx
+    - trueMETy
+  resolution:
+  - [trueMETx, METx]
+  - [trueMETy, METy]
+
+plotter_runtime:
+  xlim_control: 100
+  xlim_resolution: 50
+  bins: 20
+  alpha: 0.4
+  layout: stacked
+  mode: raw
+
+extra_plots:
+  enable: false
+  asymmetry:
+    enable: false
+    column: aco_mu_rho
+    bins: 8
+    range: [0, 6.283185307179586]
+    cp_weights: true
+    out_dir: plots/extra_plots

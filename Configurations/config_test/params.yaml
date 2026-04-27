@@ -1,0 +1,125 @@
+DYto2E-2Jets_Bin-0J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
+  eff: 361425709
+  filter_efficiency: 1.0
+  xs: 1664.6841730883225
+DYto2E-2Jets_Bin-1J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
+  eff: 157085124
+  filter_efficiency: 1.0
+  xs: 316.2403378778898
+DYto2E-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
+  eff: 93308416
+  filter_efficiency: 1.0
+  xs: 116.47203023117962
+DYto2Mu-2Jets_Bin-0J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
+  eff: 372185391
+  filter_efficiency: 1.0
+  xs: 1664.6841730883225
+DYto2Mu-2Jets_Bin-1J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
+  eff: 187595401
+  filter_efficiency: 1.0
+  xs: 316.2403378778898
+DYto2Mu-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
+  eff: 83824763
+  filter_efficiency: 1.0
+  xs: 116.47203023117962
+DYto2Tau-2Jets_Bin-0J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
+  eff: 394163979
+  filter_efficiency: 1.0
+  xs: 1664.6841730883225
+DYto2Tau-2Jets_Bin-1J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
+  eff: 198835949
+  filter_efficiency: 1.0
+  xs: 316.2403378778898
+DYto2Tau-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
+  eff: 70561081
+  filter_efficiency: 1.0
+  xs: 116.47203023117962
+TBbarQtoLNu-t-channel-4FS_TuneCP5_13p6TeV_powheg-madspin-pythia8:
+  eff: 41430055
+  filter_efficiency: 1.0
+  xs: 145.0
+TTto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8:
+  eff: 466316813
+  filter_efficiency: 1.0
+  xs: 98.04387875606875
+TTto4Q_TuneCP5_13p6TeV_powheg-pythia8:
+  eff: 468706061
+  filter_efficiency: 1.0
+  xs: 419.8071644141188
+TTtoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8:
+  eff: 480548627
+  filter_efficiency: 1.0
+  xs: 405.74895682981236
+TWminusto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8:
+  eff: 2412092
+  filter_efficiency: 1.0
+  xs: 3.8
+TWminustoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8:
+  eff: 5034877
+  filter_efficiency: 1.0
+  xs: 15.8
+TbarBQtoLNu-t-channel-4FS_TuneCP5_13p6TeV_powheg-madspin-pythia8:
+  eff: 20789716
+  filter_efficiency: 1.0
+  xs: 87.2
+TbarWplusto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8:
+  eff: 2417280
+  filter_efficiency: 1.0
+  xs: 3.8
+TbarWplustoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8:
+  eff: 4813130
+  filter_efficiency: 1.0
+  xs: 15.9
+WWto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8:
+  eff: 239895910
+  filter_efficiency: 1.0
+  xs: 122.27052
+WWto4Q_TuneCP5_13p6TeV_powheg-pythia8:
+  eff: 151184045
+  filter_efficiency: 1.0
+  xs: 122.27052
+WWtoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8:
+  eff: 275669765
+  filter_efficiency: 1.0
+  xs: 122.27052
+WZ_TuneCP5_13p6TeV_pythia8:
+  eff: 30547825
+  filter_efficiency: 1.0
+  xs: 41.1474
+WZto2L2Q_TuneCP5_13p6TeV_powheg-pythia8:
+  eff: 235803796
+  filter_efficiency: 1.0
+  xs: 41.1474
+WtoENu-2Jets_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
+  eff: 377389354
+  filter_efficiency: 1.0
+  xs: 21141.699999999997
+WtoMuNu-2Jets_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
+  eff: 364382686
+  filter_efficiency: 1.0
+  xs: 21141.699999999997
+WtoTauNu-2Jets_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
+  eff: 340144826
+  filter_efficiency: 1.0
+  xs: 21141.699999999997
+ZZ_TuneCP5_13p6TeV_pythia8:
+  eff: 4800000
+  filter_efficiency: 1.0
+  xs: 19.431
+ZZto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8:
+  eff: 188298156
+  filter_efficiency: 1.0
+  xs: 19.431
+ZZto2L2Q_TuneCP5_13p6TeV_powheg-pythia8:
+  eff: 170569959
+  filter_efficiency: 1.0
+  xs: 19.431
+ZZto2Nu2Q_TuneCP5_13p6TeV_powheg-pythia8:
+  eff: 45974330
+  filter_efficiency: 1.0
+  xs: 19.431
+ZZto4L_TuneCP5_13p6TeV_powheg-pythia8:
+  eff: 234299669
+  filter_efficiency: 1.0
+  xs: 19.431
+lumi: 109948.2
