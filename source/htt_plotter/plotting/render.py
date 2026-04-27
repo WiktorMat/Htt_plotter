@@ -131,11 +131,9 @@ def save_data_mc_ratio_plot(
 
     bottom = np.zeros_like(total_mc)
 
-    # Ensure QCD is drawn first so it appears at the bottom of the stack.
-    items = list(mc_samples.items())
-    items.sort(key=lambda kv: (0 if kv[0].lower() == "qcd" else 1))
-
-    for name, vals in items:
+    # Draw order is taken from the insertion order of `mc_samples`.
+    # (The Plotter can pre-order it e.g. according to process.json.)
+    for name, vals in mc_samples.items():
         color = "green" if name.lower() == "qcd" else get_color(name)
         label = "QCD (from SS)" if name.lower() == "qcd" else name
 

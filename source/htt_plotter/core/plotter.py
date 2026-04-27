@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 
 from htt_plotter.backgrounds.qcd import add_qcd_from_ss
 from htt_plotter.config.loader import load_configs
+from htt_plotter.core.draw_order import order_mapping_by_list, order_mc_samples, process_draw_order
 from htt_plotter.io.data_access import DataAccess
 from htt_plotter.io.hist_parquet import read_histograms_parquet, write_histograms_parquet
 from htt_plotter.physics.weights import compute_mc_weight
@@ -72,9 +73,9 @@ class Plotter:
 
         self.logger = logging.getLogger(__name__)
 
-
         self.sample_to_process = self._build_sample_to_process_map()
         self.process_colors = self._build_process_colors()
+        self._process_draw_order = process_draw_order(self.process_config)
         self.logger.debug("Process colors: %s", self.process_colors)
         self.logger.debug("Sample→process map: %s", self.sample_to_process)
 
@@ -262,7 +263,7 @@ class Plotter:
                 out_path = folder / f"{variable}.png"
 
                 save_stacked_plot(
-                    hist,
+                    order_mapping_by_list(hist, self._process_draw_order),
                     edges,
                     title=f"Control: {variable}",
                     xlabel=variable,
@@ -286,7 +287,7 @@ class Plotter:
                 out_path = folder / f"{file.stem}.png"
 
                 save_stacked_plot(
-                    hist,
+                    order_mapping_by_list(hist, self._process_draw_order),
                     edges,
                     title=f"Resolution: {variable}",
                     xlabel=variable,
@@ -324,7 +325,7 @@ class Plotter:
                 save_data_mc_ratio_plot(
                     bin_edges=edges,
                     data_counts=data_counts,
-                    mc_samples=mc_samples,
+                    mc_samples=order_mapping_by_list(mc_samples, self._process_draw_order),
                     out_path=str(out_path),
                     xlabel=variable,
                     get_color=self._get_process_color,
@@ -421,6 +422,11 @@ class Plotter:
                     scale = item.get("scale", 1.0)
                     schema = set(item.get("schema", set()))
 
+                    runtime_cfg = self.plotter_config.get("plotter_runtime", {}) or {}
+                    prefetch_batches = int(runtime_cfg.get("io_prefetch_batches", 4) or 0)
+                    if prefetch_batches < 0:
+                        prefetch_batches = 0
+
                     msg = (
                         f"[cyan]Sample:[/cyan] {sample} | "
                         f"[yellow]kind:[/yellow] {kind} | "
@@ -430,13 +436,42 @@ class Plotter:
 
                     status.update(msg)
 
-                    self.logger.info(
+                    self.logger.debug(
                         "Sample start: %s | kind=%s | files=%d | schema_cols=%d",
                         sample,
                         kind,
                         len(item.get("files", [])),
                         len(schema)
                     )
+
+                    base_status = msg
+
+                    def _on_scan_progress(info: dict) -> None:
+                        event = info.get("event")
+
+                        if event == "chunk_start":
+                            chunk = info.get("chunk")
+                            chunks = info.get("chunks")
+                            if chunk is not None and chunks is not None:
+                                status.update(f"{base_status} | chunk {chunk}/{chunks}")
+                            return
+
+                        if event in {"start", "progress", "done"}:
+                            batches = info.get("batches", 0)
+                            rows = info.get("rows", 0)
+                            elapsed_s = float(info.get("elapsed_s", 0.0))
+                            io_s = float(info.get("io_s", 0.0))
+                            consumer_s = float(info.get("consumer_s", 0.0))
+
+                            chunk = info.get("chunk")
+                            chunks = info.get("chunks")
+                            chunk_msg = (
+                                f" | chunk {chunk}/{chunks}" if chunk is not None and chunks is not None else ""
+                            )
+
+                            status.update(
+                                f"{base_status}{chunk_msg} | batches {batches} | rows {rows} | elapsed {elapsed_s:.1f}s | io {io_s:.1f}s | consumer {consumer_s:.1f}s"
+                            )
 
                     process = self._sample_to_process(sample)
                     # If a process contains any data sample, treat the whole process as data.
@@ -463,6 +498,9 @@ class Plotter:
                     if do_mc_data:
                         needed |= set(present_control)
                         needed.add("os")
+                        needed.add("trg_singlemuon")
+                        needed.add("trg_mt_cross")
+                        needed.add("weight")
 
                     # Columns needed to evaluate selection (for dataset filter).
                     needed |= {c for c in selection_cols if c in schema}
@@ -482,7 +520,14 @@ class Plotter:
                     columns = [c for c in columns if c in item["schema"]]
                     self.logger.debug("Columns AFTER  (%s): %s", sample, columns)
 
-                    for batch in self.data_access.iter_batches(item, columns=columns, filter_expr=filter_expr):
+                    for batch in self.data_access.iter_batches(
+                        item,
+                        columns=columns,
+                        filter_expr=filter_expr,
+                        progress_callback=_on_scan_progress,
+                        progress_interval_s=10.0,
+                        prefetch_batches=prefetch_batches,
+                    ):
                         # Control plots
                         if do_control and present_control:
                             for var in present_control:
@@ -533,11 +578,17 @@ class Plotter:
 
                                 for region_name, region_mask in {"OS": os_flag == 1, "SS": os_flag == 0}.items():
                                     mask = region_mask & np.isfinite(values)
+                                    trg_single = self._to_numpy(batch, "trg_singlemuon")
+                                    trg_cross  = self._to_numpy(batch, "trg_mt_cross")
+                                    trigger_mask = (trg_single == 1) | (trg_cross == 1)
+                                    mask &= trigger_mask
                                     if not np.any(mask):
                                         continue
 
+                                    weights = self._to_numpy(batch, "weight")
+
                                     edges = control_edges[var]
-                                    raw_counts, _ = np.histogram(values[mask], bins=edges)
+                                    raw_counts, _ = np.histogram(values[mask], bins=edges, weights=weights[mask])
                                     raw_counts = raw_counts.astype(float)
                                     counts = raw_counts * mc_weight
                                     sumw2 = raw_counts * (mc_weight**2)
@@ -597,7 +648,7 @@ class Plotter:
                             continue
                         out_path = f"plots/control_plots/{var}.png"
                         save_stacked_plot(
-                            hist,
+                            order_mapping_by_list(hist, self._process_draw_order),
                             control_edges[var],
                             title=f"Control: {var}",
                             xlabel=var,
@@ -623,7 +674,7 @@ class Plotter:
                             continue
                         out_path = f"plots/resolution_plots/Resolution_{r}_from_{c}.png"
                         save_stacked_plot(
-                            hist,
+                            order_mapping_by_list(hist, self._process_draw_order),
                             resolution_edges[(c, r)],
                             title=f"Resolution: {r} vs {c}",
                             xlabel=f"res_{r}",
@@ -658,6 +709,25 @@ class Plotter:
                         data_ss = _sum_counts(histograms["SS"], want_kind="data")
                         mc_os = _sum_counts(histograms["OS"], want_kind="mc")
                         mc_ss = _sum_counts(histograms["SS"], want_kind="mc")
+
+                        # ============================
+                        # DEBUG: DATA RATE vs MC NORMALIZATION
+                        # ============================
+
+                        # weź luminosity z configa (params.yaml)
+                        lumi = self.params.get("lumi", None)
+
+                        if lumi is not None and data_os > 0:
+                            data_rate = data_os / lumi
+                            mc_total = mc_os
+
+                            self.logger.info(
+                                "[DEBUG NORM] %s | Data/Lumi = %.6e | Sum(MC weights) = %.6e | Ratio (MC / (Data/Lumi)) = %.3f",
+                                var,
+                                data_rate,
+                                mc_total,
+                                mc_total / data_rate if data_rate > 0 else -1,
+                            )
 
                         if data_os > 0:
                             self.logger.info(
@@ -716,7 +786,11 @@ class Plotter:
                         save_data_mc_ratio_plot(
                             bin_edges=control_edges[var],
                             data_counts=data_counts,
-                            mc_samples=mc_samples,
+                            mc_samples=order_mc_samples(
+                                mc_samples,
+                                desired_order=self._process_draw_order,
+                                process_kinds=process_kinds,
+                            ),
                             data_unc=data_unc,
                             mc_total_unc=mc_total_unc,
                             out_path=out_path,
