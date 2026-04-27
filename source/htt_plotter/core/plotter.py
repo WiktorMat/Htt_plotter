@@ -22,6 +22,7 @@ from rich.console import Console
 from rich.live import Live
 from rich.table import Table
 from rich.status import Status
+from tools.Plot_3D import plot_events
 
 try:
     import uproot
@@ -332,6 +333,44 @@ class Plotter:
                 )
 
                 self.logger.info("Rendered mc/data from parquet: %s", out_path)
+
+    def run_3DPlot(self, n_events: int = 1):
+        import pandas as pd
+
+        self.logger.info("Running in 3D Plot mode")
+
+        if not self.index:
+            self.load_index()
+
+        events = []
+        sample_names = []
+
+        for item in self.index:
+            sample = item["sample"]
+
+            for batch in self.data_access.iter_batches(item):
+                df = batch.to_pandas()
+
+                if len(df) == 0:
+                    continue
+
+                for i in range(min(n_events, len(df))):
+                    events.append(df.iloc[i])
+                    sample_names.append(sample)
+
+                break
+
+            if len(events) >= n_events:
+                break
+
+        if not events:
+            self.logger.warning("No events found for display")
+            return
+
+        self.logger.info("Collected %d events for display", len(events))
+
+        plot_events(events, sample_names, elev=23.5, azim=67.2,
+                    save_path="plots/event_display.png")
     
     def run_all(self, *, do_control: bool = True, do_resolution: bool = True, do_mc_data: bool = True) -> None:
         """Fill and render all plots in a single pass over input data."""
@@ -343,7 +382,9 @@ class Plotter:
                 do_mc_data=do_mc_data,
             )
             return
-        
+        elif self.mode == "3D_Plot":
+            self.run_3DPlot()
+            return        
         elif self.mode == "raw":
             if not self.index:
                 self.load_index()
@@ -771,8 +812,6 @@ class Plotter:
                                 else:
                                     mc_sumw2_total += sumw2
 
-                        if data_counts is None or not mc_samples:
-                            continue
 
                         data_unc = None
                         if data_sumw2 is not None:

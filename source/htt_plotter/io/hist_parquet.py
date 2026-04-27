@@ -41,7 +41,14 @@ def write_histograms_parquet(
         samples.append(sample)
         plot_types.append(plot_type)
         variables.append(variable)
-        counts_data.append(np.asarray(counts, dtype=float).tolist())
+        arr = np.asarray(counts, dtype=float)
+
+        if arr.ndim == 0:
+            arr = np.array([], dtype=float)
+
+        arr = np.nan_to_num(arr, nan=0.0)
+
+        counts_data.append(arr.tolist())
         edges_data.append(edges_list)
 
     table = pa.Table.from_arrays(
