@@ -1,3 +1,4 @@
+import argparse
 import logging
 import sys
 import subprocess
@@ -22,6 +23,7 @@ def main():
         help="Configuration name (folder inside Configurations/)",
     )
 
+    parser.add_argument("--output", type=str, default=None, help="Podfolder w katalogu plots/")
     args = parser.parse_args()
     config_name = args.config
 
@@ -58,6 +60,7 @@ def main():
         layout="stacked",
         config_name=config_name,
         mode="raw",
+        output_suffix=args.output,
     )
     plotter.run_all()
 

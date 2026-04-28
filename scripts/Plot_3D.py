@@ -8,6 +8,15 @@ from pathlib import Path
 base_dir = Path(r"D:\Praktyki_zawodowe\Htt_plotter\data\output\test_plotter\Run3_2024\mt")
 process_path = Path(r"D:\Praktyki_zawodowe\Htt_plotter\Configurations\config_0\process.json")
 
+def safe_get(event, var_name, suffix):
+    keys_to_try = [f"{var_name}{suffix}", f"{var_name}_{suffix}"]
+    for k in keys_to_try:
+        if k in event:
+            return event[k]
+    for k in keys_to_try:
+        if k.lower() in event: return event[k.lower()]
+    return 0
+
 def pt_eta_phi_to_xyz(pt, eta, phi, scale=1.0):
     pt = float(pt)
     eta = np.clip(float(eta), -6, 6)
@@ -133,20 +142,20 @@ def extract_pions(event, suffix):
     base_names = ["pi", "pi2", "pi3", "pi0"]
     
     for name in base_names:
-        pt_key = f"{name}_pt_{suffix}"
+        pt = safe_get(event, f"{name}_pt", suffix)
         
-        if pt_key in event and pd.notna(event[pt_key]) and event[pt_key] > 0:
+        if pt > 0 and pd.notna(pt):
             p_vec = pt_eta_phi_to_xyz(
-                event[f"{name}_pt_{suffix}"],
-                event[f"{name}_eta_{suffix}"],
-                event[f"{name}_phi_{suffix}"]
+                pt,
+                safe_get(event, f"{name}_eta", suffix),
+                safe_get(event, f"{name}_phi", suffix)
             )
             
             pions.append({
                 "type": name,
                 "p": p_vec,
-                "energy": event.get(f"{name}_Energy_{suffix}", 0),
-                "charge": event.get(f"{name}_charge_{suffix}", 0)
+                "energy": safe_get(event, f"{name}_Energy", suffix),
+                "charge": safe_get(event, f"{name}_charge", suffix)
             })
     return pions
 
@@ -181,8 +190,16 @@ def plot_events(events, sample_names, elev=20, azim=45, save_path=None):
         pions1 = extract_pions(event, "1")
         pions2 = extract_pions(event, "2")
         
-        tau1_dir = pt_eta_phi_to_xyz(event["pt_1"], event["eta_1"], event["phi_1"])
-        tau2_dir = pt_eta_phi_to_xyz(event["pt_2"], event["eta_2"], event["phi_2"])
+        tau1_dir = pt_eta_phi_to_xyz(
+            safe_get(event, "pt", "1"), 
+            safe_get(event, "eta", "1"), 
+            safe_get(event, "phi", "1")
+        )
+        tau2_dir = pt_eta_phi_to_xyz(
+            safe_get(event, "pt", "2"), 
+            safe_get(event, "eta", "2"), 
+            safe_get(event, "phi", "2")
+        )
 
         def draw_logic(ax, start, direction, pions):
             nonlocal has_muon, has_tau

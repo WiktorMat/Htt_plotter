@@ -52,6 +52,7 @@ class Plotter:
         alpha: float | None = None,
         layout: str | None = None,
         mode: str | None = None,
+        output_suffix=None
     ):
         self.config_name = config_name
         self.project_root = Path(__file__).resolve().parents[3]
@@ -64,6 +65,13 @@ class Plotter:
         self.contr_name: list[str] = []
         self.recon_name: list[str] = []
         self.resolution_pairs: list[tuple[str, str]] = []
+
+        self.output_suffix = output_suffix
+
+        if self.output_suffix:
+            self.base_dir = Path("plots") / self.output_suffix
+        else:
+            self.base_dir = Path("plots")
 
 
         configs = load_configs(self.project_root, self.config_name)
@@ -363,14 +371,11 @@ class Plotter:
             )
 
             if do_control:
-                self.logger.info("Ensuring output dir: plots/control_plots")
-                ensure_dir("plots/control_plots")
+                ensure_dir(self.base_dir / "control_plots")
             if do_resolution:
-                self.logger.info("Ensuring output dir: plots/resolution_plots")
-                ensure_dir("plots/resolution_plots")
+                ensure_dir(self.base_dir / "resolution_plots")
             if do_mc_data:
-                self.logger.info("Ensuring output dir: plots/mc_data_plots")
-                ensure_dir("plots/mc_data_plots")
+                ensure_dir(self.base_dir / "mc_data_plots")
 
             # Precompute bin edges
             control_edges = {v: self._bin_edges(v) for v in self.contr_name}
@@ -668,10 +673,11 @@ class Plotter:
 
                 # Render control
                 if do_control:
+                    control_dir = self.base_dir / "control_plots"
                     for var, hist in control_hists.items():
                         if not hist:
                             continue
-                        out_path = f"plots/control_plots/{var}.png"
+                        out_path = str(control_dir / f"{var}.png")
                         save_stacked_plot(
                             order_mapping_by_list(hist, self._process_draw_order),
                             control_edges[var],
@@ -694,10 +700,11 @@ class Plotter:
 
                 # Render resolution
                 if do_resolution:
+                    res_dir = self.base_dir / "resolution_plots"
                     for (c, r), hist in resolution_hists.items():
                         if not hist:
                             continue
-                        out_path = f"plots/resolution_plots/Resolution_{r}_from_{c}.png"
+                        out_path = str(res_dir / f"Resolution_{r}_from_{c}.png")
                         save_stacked_plot(
                             order_mapping_by_list(hist, self._process_draw_order),
                             resolution_edges[(c, r)],
@@ -800,7 +807,7 @@ class Plotter:
                         if mc_sumw2_total is not None:
                             mc_total_unc = np.sqrt(np.maximum(mc_sumw2_total, 0.0))
 
-                        out_path = f"plots/mc_data_plots/MC_vs_Data_{var}.png"
+                        out_path = self.base_dir / "mc_data_plots" / f"MC_vs_Data_{var}.png"
                         save_data_mc_ratio_plot(
                             bin_edges=control_edges[var],
                             data_counts=data_counts,
@@ -828,6 +835,10 @@ class Plotter:
                         self.logger.info("Saved MC/Data plot: %s (parquet: %s)", out_path, parquet_path)
 
             if extra_cfg.get("enable", False) and asymmetry_buffer:
+                asym_run_cfg = asym_cfg.copy()
+                
+                asym_run_cfg["out_dir"] = str(self.base_dir / "extra_plots")
+
                 for column, data in asymmetry_buffer.items():
                     if len(data["even"]) == 0 or len(data["odd"]) == 0:
                         continue
@@ -838,8 +849,8 @@ class Plotter:
                     plot_asymmetry(
                         hist_even, 
                         hist_odd, 
-                        asym_cfg, 
-                        column, 
+                        asym_run_cfg, 
+                        column,
                         logger=self.logger
                     )
         else:
