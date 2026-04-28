@@ -61,15 +61,12 @@ class DataAccess:
         return scan_dirs(self.project_root, dirs_cfg, logger=self.logger)
 
     def _infer_format(self, files: list[Path]) -> str:
+        suffixes = {Path(p).suffix.lower() for p in files if p}
         if not files:
             files = [Path(f) for f in files if f]
             if not files:
                 self.logger.warning("Empty file list after cleaning → fallback to 'unknown'")
                 return "unknown"
-            if len(suffixes) != 1:
-                self.logger.warning("Mixed file types → fallback to first file type")
-                return next(iter(suffixes))
-        suffixes = {Path(p).suffix.lower() for p in files if p}
         if len(suffixes) != 1:
             raise ValueError(f"Mixed file types not supported: {sorted(suffixes)}")
         s = next(iter(suffixes))
@@ -239,6 +236,7 @@ class DataAccess:
                 io_time_s = 0.0
                 consumer_time_s = 0.0
                 resume_time = t0
+                failed_files = 0
 
                 for chunk_idx, chunk_files in enumerate(file_chunks, start=1):
                     if dataset is None or len(file_chunks) > 1:
@@ -257,14 +255,11 @@ class DataAccess:
                             batch_size=batch_size,
                         )
                     except Exception as e:
-                        failed_files = 0
                         failed_files += 1
                         self.logger.error("Scanner failed for %s → %s", cache_key, e)
                         return
                 
                 if failed_files == len(files):
-                    self.logger.error("All CSV files failed → returning empty dataset")
-                    return
 
                     if len(file_chunks) > 1:
                         yield (
@@ -379,7 +374,7 @@ class DataAccess:
                 for p in files:
                     read_t0 = time.perf_counter()
                     try:
-                        df = pd.read_csv(p, usecols=columns)
+                        df = pd.read_csv(p)
                     except Exception as e:
                         self.logger.warning("CSV read failed %s → %s", p, e)
                         continue

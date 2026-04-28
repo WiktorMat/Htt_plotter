@@ -339,7 +339,7 @@ class Plotter:
 
     def run_3DPlot(self, n_events: int = 1):
         import pandas as pd
-
+        
         self.logger.info("Running in 3D Plot mode")
 
         if not self.index:
@@ -537,10 +537,9 @@ class Plotter:
                             needed.add(r)
                     if do_mc_data:
                         needed |= set(present_control)
-                        needed.add("os")
-                        needed.add("trg_singlemuon")
-                        needed.add("trg_mt_cross")
-                        needed.add("weight")
+                        for optional_col in ["os", "trg_singlemuon", "trg_mt_cross", "weight"]:
+                            if optional_col in schema:
+                                needed.add(optional_col)
 
                     # Columns needed to evaluate selection (for dataset filter).
                     needed |= {c for c in selection_cols if c in schema}
@@ -621,22 +620,44 @@ class Plotter:
                                 add_histogram(resolution_hists[(c, r)], process, counts)
 
                         # MC/Data agreement (OS/SS)
-                        if do_mc_data and present_control and "os" in batch.schema.names:
-                            os_flag = self._to_numpy(batch, "os")
+                        has_os_col = "os" in batch.schema.names
+
+                        if do_mc_data and present_control:
+                            if has_os_col:
+                                os_flag = self._to_numpy(batch, "os")
+                            else:
+                                os_flag = np.ones(batch.num_rows, dtype=np.int32)
 
                             for var in present_control:
                                 values = self._to_numpy(batch, var)
 
-                                for region_name, region_mask in {"OS": os_flag == 1, "SS": os_flag == 0}.items():
+                                regions_to_fill = {"OS": os_flag == 1}
+                                if has_os_col:
+                                    regions_to_fill["SS"] = (os_flag == 0)
+                                else:
+                                    regions_to_fill["SS"] = np.zeros(batch.num_rows, dtype=bool)
+
+                                for region_name, region_mask in regions_to_fill.items():
                                     mask = region_mask & np.isfinite(values)
-                                    trg_single = self._to_numpy(batch, "trg_singlemuon")
-                                    trg_cross  = self._to_numpy(batch, "trg_mt_cross")
-                                    trigger_mask = (trg_single == 1) | (trg_cross == 1)
-                                    mask &= trigger_mask
+                                    
+                                    has_trg1 = "trg_singlemuon" in batch.schema.names
+                                    has_trg2 = "trg_mt_cross" in batch.schema.names
+                                    
+                                    if has_trg1 or has_trg2:
+                                        trg_mask = np.zeros(batch.num_rows, dtype=bool)
+                                        if has_trg1:
+                                            trg_mask |= (self._to_numpy(batch, "trg_singlemuon") == 1)
+                                        if has_trg2:
+                                            trg_mask |= (self._to_numpy(batch, "trg_mt_cross") == 1)
+                                        mask &= trg_mask
+
                                     if not np.any(mask):
                                         continue
 
-                                    weights = self._to_numpy(batch, "weight")
+                                    if "weight" in batch.schema.names:
+                                        weights = self._to_numpy(batch, "weight")
+                                    else:
+                                        weights = np.ones(batch.num_rows, dtype=float)
 
                                     edges = control_edges[var]
                                     raw_counts, _ = np.histogram(values[mask], bins=edges, weights=weights[mask])
@@ -645,7 +666,6 @@ class Plotter:
                                     sumw2 = raw_counts * (mc_weight**2)
 
                                     process = self._sample_to_process(sample)
-
                                     region = agreement[var][region_name]
 
                                     if process not in region:
