@@ -22,7 +22,8 @@ from rich.console import Console
 from rich.live import Live
 from rich.table import Table
 from rich.status import Status
-from scripts.tools.Plot_3D import plot_events
+from scripts.Plot_3D import plot_events
+from htt_plotter.plotting.asymmetry import plot_asymmetry
 
 try:
     import uproot
@@ -197,53 +198,6 @@ class Plotter:
             cache=self._bin_cache,
         )
         return edges
-    
-    def calculate_asymmetry(self, hist_odd, hist_even):
-        diff = hist_odd - hist_even
-        sum_abs_diff = np.sum(np.abs(diff))
-        total_events = np.sum(hist_odd + hist_even)
-
-        asymmetry = sum_abs_diff / total_events if total_events > 0 else 0.0
-
-        self.logger.info("Sum |odd-even|: %.6f", sum_abs_diff)
-        self.logger.info("Total events: %.6f", total_events)
-
-        return asymmetry
-    
-    def plot_asymmetry(self, hist_even, hist_odd, cfg, column):
-        asymmetry = self.calculate_asymmetry(hist_odd, hist_even)
-
-        bins = cfg.get("bins", 20)
-        range_ = tuple(cfg.get("range", (0, 2*np.pi)))
-
-        centers = np.linspace(range_[0], range_[1], bins)
-        width = (range_[1] - range_[0]) / bins
-
-        plt.figure(figsize=(6, 4))
-
-        plt.bar(centers, hist_even, width=width, alpha=0.7, label="CP-even")
-        plt.bar(centers, hist_odd, width=width, alpha=0.7, label="CP-odd")
-
-        plt.xlabel(column)
-        plt.ylabel("Events")
-        plt.title("Decay Plane Asymmetry")
-
-        plt.text(
-            0.05, 0.95,
-            f"Asymmetry = {asymmetry:.4f}",
-            transform=plt.gca().transAxes,
-            bbox=dict(facecolor="white", alpha=0.8)
-        )
-
-        out_dir = cfg.get("out_dir", "plots/extra_plots")
-        Path(out_dir).mkdir(parents=True, exist_ok=True)
-
-        outpath = f"{out_dir}/{column}_asymmetry.png"
-        plt.tight_layout()
-        plt.savefig(outpath)
-        plt.close()
-
-        self.logger.info("Saved asymmetry plot: %s", outpath)
 
     @staticmethod
     def _to_numpy(batch, name: str) -> np.ndarray:
@@ -875,18 +829,18 @@ class Plotter:
 
             if extra_cfg.get("enable", False) and asymmetry_buffer:
                 for column, data in asymmetry_buffer.items():
-
                     if len(data["even"]) == 0 or len(data["odd"]) == 0:
                         continue
 
                     hist_even = np.sum(data["even"], axis=0)
                     hist_odd = np.sum(data["odd"], axis=0)
 
-                    self.plot_asymmetry(
-                        hist_even,
-                        hist_odd,
-                        asym_cfg,
-                        column
+                    plot_asymmetry(
+                        hist_even, 
+                        hist_odd, 
+                        asym_cfg, 
+                        column, 
+                        logger=self.logger
                     )
         else:
             self.logger.warning("There is no mode like that!")

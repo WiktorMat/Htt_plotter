@@ -114,6 +114,9 @@ def save_data_mc_ratio_plot(
     xlabel: str,
     get_color,
 ) -> None:
+    if data_counts is None:
+        data_counts = np.zeros(len(bin_edges) - 1)
+
     bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
 
     total_mc = np.zeros_like(data_counts)
@@ -264,6 +267,5 @@ def save_data_mc_ratio_plot(
     rax.set_ylabel("Data/MC")
     rax.set_xlabel(xlabel)
     rax.set_ylim(0.5, 1.5)
-
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close()
