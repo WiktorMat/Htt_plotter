@@ -22,7 +22,7 @@ from rich.console import Console
 from rich.live import Live
 from rich.table import Table
 from rich.status import Status
-from tools.Plot_3D import plot_events
+from scripts.tools.Plot_3D import plot_events
 
 try:
     import uproot
@@ -64,13 +64,6 @@ class Plotter:
         self.recon_name: list[str] = []
         self.resolution_pairs: list[tuple[str, str]] = []
 
-        (
-            self.sample_config,
-            self.params,
-            self.variable_config,
-            self.plotter_config,
-            self.process_config,
-        ) = load_configs(self.project_root, self.config_name)
 
         configs = load_configs(self.project_root, self.config_name)
 
@@ -444,18 +437,14 @@ class Plotter:
 
             console = Console()
 
-            with Live(console=console, refresh_per_second=4) as live:
+            table = Table(title="Processing samples")
+            table.add_column("Index")
+            table.add_column("Sample")
+            table.add_column("Kind")
+
+            with Live(table, console=console, refresh_per_second=4) as live:
                 for i, item in enumerate(self.index):
-                    sample = item["sample"]
-                    kind = item.get("kind", "mc")
-
-                    table = Table(title="Processing samples")
-                    table.add_column("Index")
-                    table.add_column("Sample")
-                    table.add_column("Kind")
-
-                    table.add_row(str(i+1), sample, kind)
-
+                    table.add_row(str(i+1), item["sample"], item.get("kind", "mc"))
                     live.update(table)
 
             console = Console()
@@ -564,7 +553,13 @@ class Plotter:
                     if kind == "data":
                         mc_weight = 1.0
                     else:
-                        params_key = (self.sample_config.get(sample) or {}).get("params_key", sample)
+                        self.params_fallback = {
+                            sample: sample.split("-")[0]
+                        }
+                        params_key = (
+                            (self.sample_config.get(sample) or {}).get("params_key")
+                            or sample.split("-")[0].split("_")[0]
+                        )
                         mc_weight = compute_mc_weight(params_key, self.params, cache=self._mc_weight_cache)
 
                     self.logger.debug("Columns BEFORE (%s): %s", sample, columns)
@@ -592,7 +587,7 @@ class Plotter:
                                 if edges is None or len(edges) < 2:
                                     self.logger.warning(f"No valid binning for {var}, skipping")
                                     continue
-                                
+
                                 counts, _ = np.histogram(values[mask], bins=edges)
                                 counts = counts * scale
                                 process = self._sample_to_process(sample)
@@ -626,7 +621,7 @@ class Plotter:
                                 add_histogram(resolution_hists[(c, r)], process, counts)
 
                         # MC/Data agreement (OS/SS)
-                        if do_mc_data and present_control and ("os" in schema) and ("os" in batch.schema.names):
+                        if do_mc_data and present_control and "os" in batch.schema.names:
                             os_flag = self._to_numpy(batch, "os")
 
                             for var in present_control:
@@ -766,11 +761,6 @@ class Plotter:
                         mc_os = _sum_counts(histograms["OS"], want_kind="mc")
                         mc_ss = _sum_counts(histograms["SS"], want_kind="mc")
 
-                        # ============================
-                        # DEBUG: DATA RATE vs MC NORMALIZATION
-                        # ============================
-
-                        # weź luminosity z configa (params.yaml)
                         lumi = self.params.get("lumi", None)
 
                         if lumi is not None and data_os > 0:

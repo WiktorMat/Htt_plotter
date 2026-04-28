@@ -5,7 +5,7 @@ import argparse
 from pathlib import Path
 
 project_root = Path(__file__).resolve().parent.parent
-sys.path.append(str(project_root / "scripts"))
+sys.path.append(str(project_root))
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
@@ -59,7 +59,6 @@ def main():
         config_name=config_name,
         mode="raw",
     )
-
     plotter.run_all()
 
 
