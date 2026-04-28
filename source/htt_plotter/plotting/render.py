@@ -161,8 +161,17 @@ def save_data_mc_ratio_plot(
             align="edge",
             color=color,
             label=label,
-            edgecolor="black",
+            edgecolor="none",
+            linewidth=0,
+        )
+
+        ax.stairs(
+            bottom + vals,
+            bin_edges,
+            baseline=bottom,
+            color="black",
             linewidth=0.8,
+            zorder=2
         )
 
         bottom += vals
