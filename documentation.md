@@ -684,45 +684,130 @@
   --output data/output/merged.parquet \
   --batch-size 1000
 
-# 6. Main Execution Script
+## `plot_3D.py`:
+    This script generates a full 3D event visualization of particle interactions based on reconstructed physics objects stored in .parquet files.
+    It visualizes detector geometry, particle tracks, and decay chains in 3D space, including taus, muons, and pion decay products.
 
-## `run.py`
+### Main Functions:
+    - Loads MC datasets from processed parquet files,
+    - Maps samples to physics processes using process.json,
+    - Converts (pt, eta, phi) → 3D momentum vectors,
+    - Reconstructs decay topology of tau leptons,
+    - Renders detector geometry (cylindrical approximation),
+    - Draws particle tracks with optional glow effect,
+    - Differentiates particle types using color coding:
+        - Tau: white
+        - Muon: cyan
+        - Charged pions (π±): lime
+        - Neutral pions (π0): magenta
+
+### Example usage:
+    Set `--mode 3D_Plot` to run the 3D visualization pipeline.
+
+### 6. Main Execution Script
+#### `run.py`
     This script is the main entry point for running the full Htt_plotter pipeline.
-
     It is responsible for:
-        - setting up logging,
-        - ensuring configuration files exist,
-        - generating missing configs if needed,
-        - initializing the Plotter,
-        - executing the full plotting workflow.
-        
-    Workflow:
-        - Set up logging to both console and file (plotter.log),
-        - Select configuration directory (config_name),
-        - Ensure files.json exists (auto-generate if missing),
-        - Initialize Plotter with user-defined parameters,
-        - Run full pipeline using run_all();
+    - loading configuration files (plotter.yaml),
+    - validating config paths,
+    - initializing the Plotter,
+    - optionally running the ParquetRenderer,
+    - executing the full plotting workflow.
+    - Workflow:
+    - Parse command-line arguments,
+    Load YAML configuration from:
+        - Configurations/<config_name>/plotter.yaml
+        - Extract runtime parameters,
+        - Compute histogram binning strategy,
+        - Initialize Plotter,
+        - Run pipeline depending on selected mode.
+        - CLI Arguments (run.py)
+        Required:
+            --config – name of configuration directory (e.g. config_0)
+        Optional:
+            --output – suffix added to output plots/files
+            --mode – pipeline execution mode:
+        Modes:
+            - raw – direct plotting from data
+            - hist – histogram-based processing
+            - render – post-processing from parquet files
+            - 3D_Plot – 3D visualization mode
+            Example usage:
+                - python run.py --config config_0 --mode raw --output test_run
 
-    To run the program with custom parameters, set the following parameters:
-        - xlim_control – X-axis range for control histograms
-        - xlim_resolution – X-axis range for resolution plots
-        - bins – number of histogram bins
-        - alpha – histogram transparency
-        - layout – plot layout:
-            1.stacked
-            2.overlay
-            3.side by side
-        - config_name – configuration directory name
-        - mode – processing mode:
-            1.raw – direct data
-            2.hist – histogram-based processing
+### 7. Plotter Configuration (plotter.yaml)
+    The configuration file controls data selection, histogram behavior, plotting style, and optional advanced features.
 
-## Example usage:
-    python run.py config config_0 \
-    --xlim_control 100 \
-    --xlim_resolution 50 \
-    --bins 20 \
-    --alpha 0.4 \
-    --layout stacked \
-    --config_name config_0 \
-    --mode raw
+#### 7.1 Plotting Section
+    plotting.control
+    Defines control variables (truth-level or reference variables) used in plots.
+    Example:
+        plotting:
+        control:
+            - trueMETx
+            - trueMETy
+    These are used as baseline distributions
+    Typically represent true / generated physics quantities
+    plotting.resolution
+    Defines pairs of variables used for resolution plots:
+        plotting:
+        resolution:
+            - [trueMETx, METx]
+            - [trueMETy, METy]
+
+        Each pair means:
+            - resolution = reconstructed - true
+
+    Used for:
+        - resolution histograms
+        - performance validation
+        - detector response studies
+
+#### 7.2 Plotter Runtime Configuration
+    This section controls global plotting behavior and histogram construction.
+    plotter_runtime:
+        - xlim_control - Defines x-axis range for control plots: xlim_control: 100 - symmetric range: [-100, 100] - used for control histograms
+        - xlim_resolution - Defines range for resolution plots: xlim_resolution: [-2, 2], controls visible resolution spread, typically narrow around 0
+        - bin_width_resolution - Defines histogram bin width for resolution plots: bin_width_resolution: 0.05, Used to dynamically compute number of bins:
+            - bins = (xmax - xmin) / bin_width_resolution
+            - bins (fallback option)
+            - bins: 20 - used if bin_width_resolution is not defined, static bin count fallback
+        alpha - alpha: 0.4, transparency of histograms, affects overlay readability
+        layout - Defines plot arrangement style: layout: stacked
+        Available options:
+            - stacked – histograms stacked vertically
+            - overlay – all histograms in one plot
+            - side by side – separated panels
+        mode - Defines internal runtime mode: mode: raw, Used internally by Plotter.
+            Possible values:
+                - raw – direct input data processing
+                - hist – histogram pipeline mode
+                - render – rendering from intermediate parquet
+                - 3D_Plot – 3D visualization mode
+
+#### 7.3 Extra Plots (Optional Module)
+    This section enables additional analysis plots beyond standard pipeline output.
+    extra_plots:
+        enable: false
+        extra_plots.enable
+        enable: false
+    master switch for extra analysis modules
+    if false, entire section is ignored
+    
+##### 7.3.1 Asymmetry Analysis
+    Optional sub-module for angular or CP-related studies.
+    asymmetry:
+        - enable - enable: false, enables asymmetry computation plots
+        - column - column: aco_mu_rho, defines input variable for asymmetry study, must exist in dataset
+        - bins - bins: 8, number of bins in angular distribution
+        - range - range: [0, 6.283185307179586], full angular range (0 → 2π), used for periodic observables
+        - cp_weights - cp_weights: true, enables CP-weighted distributions, used for physics asymmetry studies
+        - out_dir - out_dir: plots/extra_plots, output directory for additional plots, independent from main pipeline output
+    Summary
+
+    This configuration system controls:
+        1. Data selection - control variables, resolution pairs
+        2. Histogram construction - binning strategy, axis limits, resolution granularity
+        3. Plot appearance - transparency (alpha), layout style
+        4. Pipeline behavior - execution mode (raw / hist / render / 3D_Plot)
+        5. Advanced physics modules - asymmetry analysis, CP-weighted observables, extra diagnostic plots
