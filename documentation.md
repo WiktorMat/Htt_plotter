@@ -704,8 +704,8 @@
 ### Example usage:
     Set `--mode 3D_Plot` to run the 3D visualization pipeline.
 
-### 6. Main Execution Script
-#### `run.py`
+## 6. Main Execution Script
+### `run.py`
     This script is the main entry point for running the full Htt_plotter pipeline.
     It is responsible for:
     - loading configuration files (plotter.yaml),
@@ -735,10 +735,10 @@
             Example usage:
                 - python run.py --config config_0 --mode raw --output test_run
 
-### 7. Plotter Configuration (plotter.yaml)
+## 7. Plotter Configuration (plotter.yaml)
     The configuration file controls data selection, histogram behavior, plotting style, and optional advanced features.
 
-#### 7.1 Plotting Section
+### 7.1 Plotting Section
     plotting.control
     Defines control variables (truth-level or reference variables) used in plots.
     Example:
@@ -763,7 +763,7 @@
         - performance validation
         - detector response studies
 
-#### 7.2 Plotter Runtime Configuration
+### 7.2 Plotter Runtime Configuration
     This section controls global plotting behavior and histogram construction.
     plotter_runtime:
         - xlim_control - Defines x-axis range for control plots: xlim_control: 100 - symmetric range: [-100, 100] - used for control histograms
@@ -785,7 +785,7 @@
                 - render – rendering from intermediate parquet
                 - 3D_Plot – 3D visualization mode
 
-#### 7.3 Extra Plots (Optional Module)
+### 7.3 Extra Plots (Optional Module)
     This section enables additional analysis plots beyond standard pipeline output.
     extra_plots:
         enable: false
@@ -794,7 +794,7 @@
     master switch for extra analysis modules
     if false, entire section is ignored
     
-##### 7.3.1 Asymmetry Analysis
+#### 7.3.1 Asymmetry Analysis
     Optional sub-module for angular or CP-related studies.
     asymmetry:
         - enable - enable: false, enables asymmetry computation plots
