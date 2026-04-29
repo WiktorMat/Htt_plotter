@@ -19,7 +19,15 @@ def get_binning(
 
     if cfg is None:
         if str(var).startswith("res_"):
-            x_min, x_max, nb = -1, 1, 50
+            if isinstance(xlim_resol, (int, float)):
+                x_min, x_max = -xlim_resol, xlim_resol
+            else:
+                x_min, x_max = xlim_resol
+            if bins is not None:
+                nb = bins
+            else:
+                bin_width = 0.05
+                nb = int((x_max - x_min) / bin_width)
         else:
             x_min, x_max, nb = -xlim_ctrl, xlim_ctrl, bins
     else:

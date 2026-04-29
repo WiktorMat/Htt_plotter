@@ -4,6 +4,7 @@ import sys
 import subprocess
 import argparse
 from pathlib import Path
+import yaml
 
 project_root = Path(__file__).resolve().parent.parent
 sys.path.append(str(project_root))
@@ -12,7 +13,6 @@ sys.stderr.reconfigure(encoding='utf-8')
 
 from htt_plotter import Plotter
 from htt_plotter.core.plotter_render_from_parquet import ParquetRenderer
-
 
 
 def main():
@@ -31,15 +31,42 @@ def main():
     args = parser.parse_args()
     config_name = args.config
 
+    config_path = project_root / "Configurations" / config_name / "plotter.yaml"
+
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config not found: {config_path}")
+
+    with open(config_path) as f:
+        cfg = yaml.safe_load(f)
+
+    runtime = cfg.get("plotter_runtime", {})
+
+    xlim_control = runtime.get("xlim_control", 100)
+
+    xlim_resolution = runtime.get("xlim_resolution", [-2, 2])
+    bin_width_resolution = runtime.get("bin_width_resolution", 0.05)
+
+    if "bin_width_resolution" in runtime:
+        res_bins = int((xlim_resolution[1] - xlim_resolution[0]) / bin_width_resolution)
+    else:
+        res_bins = runtime.get("bins", 20)
+
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
+    
     if args.mode in ["raw", "hist", "3D_Plot"]:
         plotter = Plotter(
+            xlim_control=xlim_control,
+            xlim_resolution=xlim_resolution,
+            bins=res_bins,
+            alpha=runtime.get("alpha", 0.4),
+            layout=runtime.get("layout", "stacked"),
             config_name=config_name,
-            mode=args.mode,
+            mode="raw",
             output_suffix=args.output,
         )
 
@@ -49,11 +76,11 @@ def main():
     if args.mode == "render":
 
         plotter = Plotter(
-            xlim_control=100,
-            xlim_resolution=50,
-            bins=20,
-            alpha=0.4,
-            layout="stacked",
+            xlim_control=xlim_control,
+            xlim_resolution=xlim_resolution,
+            bins=res_bins,
+            alpha=runtime.get("alpha", 0.4),
+            layout=runtime.get("layout", "stacked"),
             config_name=config_name,
             mode="raw",
             output_suffix=args.output,

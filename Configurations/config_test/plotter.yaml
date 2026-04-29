@@ -8,7 +8,8 @@ plotting:
 
 plotter_runtime:
   xlim_control: 100
-  xlim_resolution: 50
+  xlim_resolution: [-2, 2]
+  bin_width_resolution: 0.05
   bins: 20
   alpha: 0.4
   layout: stacked

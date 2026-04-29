@@ -95,16 +95,20 @@ class Plotter:
         runtime_cfg = self.plotter_config.get("plotter_runtime") or {}
 
         runtime = {
-            "xlim_control": runtime_cfg.get("xlim_control", 100),
-            "xlim_resolution": runtime_cfg.get("xlim_resolution", 50),
-            "bins": runtime_cfg.get("bins", 20),
-            "alpha": runtime_cfg.get("alpha", 1.0),
-            "layout": runtime_cfg.get("layout", "stacked"),
-            "mode": runtime_cfg.get("mode", "raw"),
+            "xlim_control": xlim_control if xlim_control is not None else runtime_cfg.get("xlim_control", 100),
+            "xlim_resolution": xlim_resolution if xlim_resolution is not None else runtime_cfg.get("xlim_resolution", [-2, 2]),
+            "bins": bins if bins is not None else runtime_cfg.get("bins", 20),
+            "alpha": alpha if alpha is not None else runtime_cfg.get("alpha", 1.0),
+            "layout": layout if layout is not None else runtime_cfg.get("layout", "stacked"),
+            "mode": mode if mode is not None else runtime_cfg.get("mode", "raw"),
         }
+        
+        if isinstance(runtime["xlim_resolution"], (int, float)):
+            self.xlim_resol = (-runtime["xlim_resolution"], runtime["xlim_resolution"])
+        else:
+            self.xlim_resol = tuple(runtime["xlim_resolution"])
 
         self.xlim_ctrl = runtime.get("xlim_control", 100)
-        self.xlim_resol = runtime.get("xlim_resolution", 50)
         self.bins = runtime.get("bins", 20)
         self.alpha = runtime.get("alpha", 1.0)
         self.layout = runtime.get("layout", "stacked")
@@ -196,7 +200,17 @@ class Plotter:
     def batch(self) -> None:
         self.resolution_pairs = make_resolution_pairs(self.contr_name, self.recon_name)
 
-    def _bin_edges(self, var: str) -> np.ndarray:
+    def _bin_edges(self, var: str, *, is_resolution: bool = False) -> np.ndarray:
+        if is_resolution:
+            if isinstance(self.xlim_resol, (int, float)):
+                x_min, x_max = -self.xlim_resol, self.xlim_resol
+            else:
+                x_min, x_max = self.xlim_resol
+
+            nb = self.bins
+
+            edges = np.linspace(x_min, x_max, nb + 1)
+            return edges
         _, _, _, edges = get_binning(
             var,
             self.variable_config,
@@ -206,7 +220,7 @@ class Plotter:
             cache=self._bin_cache,
         )
         return edges
-
+    
     @staticmethod
     def _to_numpy(batch, name: str) -> np.ndarray:
         # Assumes numeric columns; works well for typical parquet physics tables.
@@ -379,7 +393,7 @@ class Plotter:
 
             # Precompute bin edges
             control_edges = {v: self._bin_edges(v) for v in self.contr_name}
-            resolution_edges = {pair: self._bin_edges(pair[1]) for pair in self.resolution_pairs}
+            resolution_edges = {pair: self._bin_edges(pair[1], is_resolution=True) for pair in self.resolution_pairs}
 
             # Histogram containers
             control_hists: dict[str, dict[str, np.ndarray]] = {v: {} for v in self.contr_name}
