@@ -5,6 +5,10 @@ plotting:
   resolution:
   - [trueMETx, METx]
   - [trueMETy, METy]
+  # x_labels:
+  #   trueMETx: 
+  #   METx: 
+  #   trueMETy: 
 
 plotter_runtime:
   xlim_control: 100

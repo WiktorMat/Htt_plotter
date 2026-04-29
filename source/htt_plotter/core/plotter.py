@@ -83,6 +83,7 @@ class Plotter:
         self.process_config = configs[4] or {}
 
         self.logger = logging.getLogger(__name__)
+        self.x_labels = (self.plotter_config.get("plotting") or {}).get("x_labels", {})
 
         self.sample_to_process = self._build_sample_to_process_map()
         self.process_colors = self._build_process_colors()
@@ -696,7 +697,7 @@ class Plotter:
                             order_mapping_by_list(hist, self._process_draw_order),
                             control_edges[var],
                             title=f"Control: {var}",
-                            xlabel=var,
+                            xlabel=self.x_labels.get(var, var),
                             out_path=out_path,
                             get_color=self._get_process_color,
                             layout=self.layout,
@@ -723,7 +724,7 @@ class Plotter:
                             order_mapping_by_list(hist, self._process_draw_order),
                             resolution_edges[(c, r)],
                             title=f"Resolution: {r} vs {c}",
-                            xlabel=f"res_{r}",
+                            xlabel=self.x_labels.get(r, r),
                             out_path=out_path,
                             get_color=self._get_process_color,
                             layout=self.layout,
@@ -833,7 +834,7 @@ class Plotter:
                             data_unc=data_unc,
                             mc_total_unc=mc_total_unc,
                             out_path=out_path,
-                            xlabel=var,
+                            xlabel=self.x_labels.get(var, var),
                             get_color=self._get_process_color,
                         )
                         combined = {"data": data_counts, **mc_samples}
