@@ -1,0 +1,13 @@
+Pastel colours:
+DY, #AEC6CF, Pastel azure
+W+jets, #FFB347, Pastel orange
+data, #B39EB5, Pastel violet
+others, #FFD1DC, Pastel pink
+tt, #77DD77, Pastel green
+
+Colour for colour-blind person:
+DY, #0072B2, Dark blue
+W+jets, #E69F00, Orange
+data, #009E73, Blue-green
+others, #F0E442, Yellow
+tt, #CC79A7, Linear Pink
