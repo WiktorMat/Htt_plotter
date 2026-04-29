@@ -92,7 +92,7 @@ def draw_track(ax, origin, direction, length=1.0, color="cyan", lw=2):
 
 def draw_detector_cylinder(ax, radius=2.0, length=4.0, alpha=0.05, color='cyan'):
     z = np.linspace(-length/2, length/2, 50)
-    theta = np.linspace(0, np.pi, 50)
+    theta = np.linspace(0, 2*np.pi, 100)
     theta_grid, z_grid = np.meshgrid(theta, z)
     
     x_grid = radius * np.cos(theta_grid)

@@ -66,7 +66,7 @@ def main():
             alpha=runtime.get("alpha", 0.4),
             layout=runtime.get("layout", "stacked"),
             config_name=config_name,
-            mode="raw",
+            mode=args.mode,
             output_suffix=args.output,
         )
 
@@ -82,7 +82,7 @@ def main():
             alpha=runtime.get("alpha", 0.4),
             layout=runtime.get("layout", "stacked"),
             config_name=config_name,
-            mode="raw",
+            mode=args.mode,
             output_suffix=args.output,
         )
 
