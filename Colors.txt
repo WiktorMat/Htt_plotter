@@ -4,6 +4,12 @@ W+jets, #FFB347, Pastel orange
 data, #B39EB5, Pastel violet
 others, #FFD1DC, Pastel pink
 tt, #77DD77, Pastel green
+if more needed:
+#A7C7E7, Soft sky blue
+#FF9F68, Peach coral
+#C9A0DC, Lavender mist
+#FFB7C5, Baby pink
+#8FD694, Mint green
 
 Colour for colour-blind person:
 DY, #0072B2, Dark blue
@@ -11,3 +17,9 @@ W+jets, #E69F00, Orange
 data, #009E73, Blue-green
 others, #F0E442, Yellow
 tt, #CC79A7, Linear Pink
+if more needed:
+#2F6690, Deep blue
+#D98C10, Amber orange
+#1B998B, Teal green
+#E0C341, Golden yellow
+#A23B72, Mulberry pink
