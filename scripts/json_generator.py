@@ -85,7 +85,8 @@ def add_process_colors(process_map: dict[str, list[str]]) -> dict:
     return {
         p: {
             "samples": process_map[p],
-            "color": get_color(i)
+            "color": get_color(i),
+            "label": p
         }
         for i, p in enumerate(processes)
     }

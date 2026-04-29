@@ -114,6 +114,7 @@ class Plotter:
         self.alpha = runtime.get("alpha", 1.0)
         self.layout = runtime.get("layout", "stacked")
         self.mode = runtime.get("mode", "raw")
+        self.process_labels = self._build_process_labels()
 
         self.data_access = DataAccess(
             self.project_root,
@@ -148,7 +149,20 @@ class Plotter:
                 colors[process_name] = "black"
 
         return colors
+    
+    def _build_process_labels(self) -> dict[str, str]:
+        labels: dict[str, str] = {}
 
+        for process_name, cfg in (self.process_config or {}).items():
+            if isinstance(cfg, dict):
+                labels[process_name] = cfg.get("label", process_name)
+            else:
+                labels[process_name] = process_name
+
+        return labels
+    
+    def _get_process_label(self, process: str) -> str:
+        return self.process_labels.get(process, process)
 
     def _sample_to_process(self, sample: str) -> str:
         return self.sample_to_process.get(sample, "unknown")
@@ -250,6 +264,7 @@ class Plotter:
                     xlabel=variable,
                     out_path=str(out_path),
                     get_color=self._get_process_color,
+                    get_label=self._get_process_label,
                     layout=self.layout,
                 )
 
@@ -274,6 +289,7 @@ class Plotter:
                     xlabel=variable,
                     out_path=str(out_path),
                     get_color=self._get_process_color,
+                    get_label=self._get_process_label,
                     layout=self.layout,
                 )
 
@@ -700,6 +716,7 @@ class Plotter:
                             xlabel=self.x_labels.get(var, var),
                             out_path=out_path,
                             get_color=self._get_process_color,
+                            get_label=self._get_process_label,
                             layout=self.layout,
                         )
 
@@ -727,6 +744,7 @@ class Plotter:
                             xlabel=self.x_labels.get(r, r),
                             out_path=out_path,
                             get_color=self._get_process_color,
+                            get_label=self._get_process_label,
                             layout=self.layout,
                         )
                         parquet_path = write_histograms_parquet(

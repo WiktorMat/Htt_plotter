@@ -12,6 +12,7 @@ def save_stacked_plot(
     xlabel,
     out_path,
     get_color,
+    get_label=None,
     alpha=1.0,
     layout="stacked",
 ):
@@ -33,7 +34,7 @@ def save_stacked_plot(
                 width=width,
                 bottom=bottom,
                 color=color,
-                label=label,
+                label=get_label(label) if get_label else label,
                 alpha=alpha,
                 edgecolor="black",
                 linewidth=0.8,
@@ -48,7 +49,7 @@ def save_stacked_plot(
                 counts,
                 width=width,
                 color=color,
-                label=label,
+                label=get_label(label) if get_label else label,
                 alpha=min(alpha, 0.5),
                 edgecolor="black",
                 linewidth=0.8,
@@ -81,7 +82,7 @@ def save_stacked_plot(
                 alpha=alpha,
             )
 
-            ax.set_title(label)
+            ax.set_title(get_label(label) if get_label else label)
             ax.set_xlabel(xlabel)
             if i == 0:
                 ax.set_ylabel("Entries")
@@ -97,7 +98,12 @@ def save_stacked_plot(
     ax.set_title(title)
     ax.set_xlabel(xlabel)
     ax.set_ylabel("Entries")
-    ax.legend()
+
+    handles, labels = ax.get_legend_handles_labels()
+    if get_label is not None:
+        labels = [get_label(l) for l in labels]
+    ax.legend(handles, labels)
+    
     plt.tight_layout()
     plt.savefig(out_path)
     plt.close()
@@ -113,6 +119,7 @@ def save_data_mc_ratio_plot(
     out_path: str,
     xlabel: str,
     get_color,
+    get_label=None,
 ) -> None:
     if data_counts is None:
         data_counts = np.zeros(len(bin_edges) - 1)
@@ -151,7 +158,8 @@ def save_data_mc_ratio_plot(
             color = "green" if name.lower() == "qcd" else get_color(name)
         except Exception:
             color = "gray"
-        label = "QCD (from SS)" if name.lower() == "qcd" else name
+        raw_label = "QCD (from SS)" if name.lower() == "qcd" else name
+        label = get_label(raw_label) if get_label else raw_label
 
         ax.bar(
             bin_edges[:-1],
@@ -202,6 +210,8 @@ def save_data_mc_ratio_plot(
         label="_nolegend_",
         zorder=2,
     )
+    raw_label = "Data"
+    label = get_label(raw_label) if get_label else raw_label
 
     ax.errorbar(
         bin_centers,
@@ -209,7 +219,7 @@ def save_data_mc_ratio_plot(
         yerr=data_unc,
         fmt="o",
         color="black",
-        label="Data",
+        label=label,
         markersize=3.0,
         elinewidth=1.0,
         capsize=1.5,
@@ -218,7 +228,10 @@ def save_data_mc_ratio_plot(
     )
 
     ax.set_ylabel("Events")
-    ax.legend()
+    handles, labels = ax.get_legend_handles_labels()
+    if get_label is not None:
+        labels = [get_label(l) for l in labels]
+    ax.legend(handles, labels)
 
     total_mc_safe = np.where(total_mc == 0, np.nan, total_mc)
 
