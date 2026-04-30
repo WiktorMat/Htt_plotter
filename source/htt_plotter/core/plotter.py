@@ -96,22 +96,24 @@ class Plotter:
         runtime_cfg = self.plotter_config.get("plotter_runtime") or {}
 
         runtime = {
-            "xlim_control": xlim_control if xlim_control is not None else runtime_cfg.get("xlim_control", 100),
-            "xlim_resolution": xlim_resolution if xlim_resolution is not None else runtime_cfg.get("xlim_resolution", [-2, 2]),
-            "bins": bins if bins is not None else runtime_cfg.get("bins", 20),
             "alpha": alpha if alpha is not None else runtime_cfg.get("alpha", 1.0),
             "layout": layout if layout is not None else runtime_cfg.get("layout", "stacked"),
             "mode": mode if mode is not None else runtime_cfg.get("mode", "raw"),
         }
         
-        if isinstance(runtime["xlim_resolution"], (int, float)):
-            self.xlim_resol = (-runtime["xlim_resolution"], runtime["xlim_resolution"])
+        if xlim_resolution is not None:
+            xlim_res = xlim_resolution
         else:
-            self.xlim_resol = tuple(runtime["xlim_resolution"])
+            xlim_res = runtime_cfg.get("xlim_resolution", [-2, 2])
 
-        self.xlim_ctrl = runtime.get("xlim_control", 100)
-        self.bins = runtime.get("bins", 20)
-        self.alpha = runtime.get("alpha", 1.0)
+        if isinstance(xlim_res, (int, float)):
+            self.xlim_resol = (-xlim_res, xlim_res)
+        else:
+            self.xlim_resol = tuple(xlim_res)
+
+        self.xlim_ctrl = 100
+        self.bins = 20
+        self.alpha = 1.0
         self.layout = runtime.get("layout", "stacked")
         self.mode = runtime.get("mode", "raw")
         self.process_labels = self._build_process_labels()
