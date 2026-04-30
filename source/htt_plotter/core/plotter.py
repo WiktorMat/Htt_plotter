@@ -24,6 +24,7 @@ from rich.table import Table
 from rich.status import Status
 from scripts.Plot_3D import plot_events
 from htt_plotter.plotting.asymmetry import plot_asymmetry
+from datetime import datetime
 
 try:
     import uproot
@@ -67,11 +68,10 @@ class Plotter:
         self.resolution_pairs: list[tuple[str, str]] = []
 
         self.output_suffix = output_suffix
+        if not self.output_suffix:
+            self.output_suffix = datetime.now().strftime("run_%Y-%m-%d_%H-%M-%S")
 
-        if self.output_suffix:
-            self.base_dir = Path("plots") / self.output_suffix
-        else:
-            self.base_dir = Path("plots")
+        self.base_dir = Path("plots") / self.output_suffix
 
 
         configs = load_configs(self.project_root, self.config_name)
