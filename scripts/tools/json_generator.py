@@ -127,7 +127,6 @@ def scan_mc_samples(
         kind = "data" if smart_group(sample_name) == "data" else "mc"
         samples[sample_name] = {
             "kind": kind,
-            "scale": 1.0,
             "files": [_format_path(p, path_mode=path_mode) for p in files],
         }
 

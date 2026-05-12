@@ -239,6 +239,7 @@ class DataAccess:
                 io_time_s = 0.0
                 consumer_time_s = 0.0
                 resume_time = t0
+                failed_chunks = 0
 
                 for chunk_idx, chunk_files in enumerate(file_chunks, start=1):
                     if dataset is None or len(file_chunks) > 1:
@@ -257,14 +258,15 @@ class DataAccess:
                             batch_size=batch_size,
                         )
                     except Exception as e:
-                        failed_files = 0
-                        failed_files += 1
-                        self.logger.error("Scanner failed for %s → %s", cache_key, e)
-                        return
-                
-                if failed_files == len(files):
-                    self.logger.error("All CSV files failed → returning empty dataset")
-                    return
+                        failed_chunks += 1
+                        self.logger.error(
+                            "Scanner failed for %s chunk %d/%d → %s",
+                            cache_key,
+                            chunk_idx,
+                            len(file_chunks),
+                            e,
+                        )
+                        continue
 
                     if len(file_chunks) > 1:
                         yield (
@@ -312,6 +314,13 @@ class DataAccess:
                         # processing time. It's still useful as a rough indicator.
                         resume_time = time.perf_counter()
                         consumer_time_s += resume_time - batch_ready
+
+                if failed_chunks == len(file_chunks):
+                    self.logger.error(
+                        "All parquet chunks failed for sample=%s → returning empty dataset",
+                        cache_key,
+                    )
+                    return
 
                 total_time_s = time.perf_counter() - t0
                 yield (

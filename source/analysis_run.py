@@ -1,6 +1,7 @@
 import logging
 import sys
 import subprocess
+import argparse
 from pathlib import Path
 
 from htt_plotter import Plotter
@@ -8,6 +9,22 @@ from htt_plotter import Plotter
 project_root = Path(__file__).resolve().parent.parent
 
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(description="Run HTT plotter")
+    parser.add_argument("--config-name", default="config_0", help="Configuration folder name")
+    parser.add_argument(
+        "--backend",
+        default="multiprocessing",
+        choices=["serial", "multiprocessing", "mp"],
+        help="Processing backend for raw mode",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=8,
+        help="Number of processes for multiprocessing backend",
+    )
+    args = parser.parse_args()
 
     logging.basicConfig(
         level=logging.INFO,
@@ -18,7 +35,7 @@ if __name__ == "__main__":
         ],
     )
 
-    config_name = "config_0"
+    config_name = args.config_name
 
     config_dir = project_root / "Configurations" / config_name
 
@@ -47,4 +64,8 @@ if __name__ == "__main__":
         mode="raw",
     )
 
-    plotter.run_all()
+    runtime_cfg = plotter.plotter_config.setdefault("plotter_runtime", {})
+    runtime_cfg["processing_backend"] = "multiprocessing" if args.backend == "mp" else args.backend
+    runtime_cfg["n_workers"] = max(1, int(args.workers))
+
+    plotter.run_all(do_control=False, do_resolution=False, do_mc_data=True)

@@ -89,34 +89,10 @@
             "output/test_plotter/Run3_2024/mt/TTtoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
         ]
     },
-    "TWminusto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8": {
-        "kind": "mc",
-        "files": [
-            "output/test_plotter/Run3_2024/mt/TWminusto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
-        ]
-    },
-    "TWminustoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8": {
-        "kind": "mc",
-        "files": [
-            "output/test_plotter/Run3_2024/mt/TWminustoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
-        ]
-    },
     "TbarBQtoLNu-t-channel-4FS_TuneCP5_13p6TeV_powheg-madspin-pythia8": {
         "kind": "mc",
         "files": [
             "output/test_plotter/Run3_2024/mt/TbarBQtoLNu-t-channel-4FS_TuneCP5_13p6TeV_powheg-madspin-pythia8/nominal/merged.parquet"
-        ]
-    },
-    "TbarWplusto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8": {
-        "kind": "mc",
-        "files": [
-            "output/test_plotter/Run3_2024/mt/TbarWplusto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
-        ]
-    },
-    "TbarWplustoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8": {
-        "kind": "mc",
-        "files": [
-            "output/test_plotter/Run3_2024/mt/TbarWplustoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
         ]
     },
     "WWto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8": {

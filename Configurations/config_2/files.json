@@ -74,7 +74,9 @@
     "TTto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8": {
         "kind": "mc",
         "files": [
-            "output/test_plotter/Run3_2024/mt/TTto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8/nominal/merged.parquet"
+            "/eos/home-w/wmatyszk/HiggsDNA/CleanDNA/higgs-dna-waw/output/single_mu/Run3_2024/mt/TTto2L2Nu/nominal/job0.6.parquet",
+            "/eos/home-w/wmatyszk/HiggsDNA/CleanDNA/higgs-dna-waw/output/single_mu/Run3_2024/mt/TTto2L2Nu/nominal/job0.7.parquet",
+            "/eos/home-w/wmatyszk/HiggsDNA/CleanDNA/higgs-dna-waw/output/single_mu/Run3_2024/mt/TTto2L2Nu/nominal/job0.8.parquet"
         ]
     },
     "TTto4Q_TuneCP5_13p6TeV_powheg-pythia8": {

@@ -33,7 +33,6 @@ def build_index(
 
     for sample_name, cfg in sample_config.items():
         kind = cfg.get("kind", "mc")
-        scale = cfg.get("scale", 1.0)
         color = cfg.get("color", None)
 
         files_cfg = cfg.get("files")
@@ -67,7 +66,7 @@ def build_index(
             continue
 
         _ = infer_format(files)
-        _ = kind, scale, color, source_kind, project_root
+        _ = kind, color, source_kind, project_root
 
         console = Console()
         history = []
@@ -86,7 +85,6 @@ def build_index(
         with Live(table, console=console, refresh_per_second=4) as live:
             for sample_name, cfg in sample_config.items():
                 kind = cfg.get("kind", "mc")
-                scale = cfg.get("scale", 1.0)
                 color = cfg.get("color", None)
 
                 files_cfg = cfg.get("files")
@@ -140,7 +138,6 @@ def build_index(
                     {
                         "sample": sample_name,
                         "kind": kind,
-                        "scale": scale,
                         "color": color,
                         "files": files,
                         "format": fmt,

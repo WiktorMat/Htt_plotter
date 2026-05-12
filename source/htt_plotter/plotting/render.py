@@ -130,9 +130,6 @@ def save_data_mc_ratio_plot(
         total_mc = np.zeros_like(data_counts)
         mc_samples = {"MC": total_mc.copy()}
 
-    if np.all(total_mc == 0):
-        return
-
     fig = plt.figure(figsize=(7, 6))
     gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1], hspace=0.05)
 

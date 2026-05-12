@@ -65,3 +65,22 @@ def add_qcd_from_ss(
 
     ff = float(config.get("qcd_ff", 1.0))
     os["QCD"] = {"counts": qcd_counts_ss * ff, "sumw2": qcd_sumw2_ss * (ff ** 2)}
+
+
+def ensure_qcd_placeholder(
+    histograms: dict[str, np.ndarray],
+    desired_order: list[str],
+    template: np.ndarray | None,
+) -> dict[str, np.ndarray]:
+    """Insert an empty QCD histogram when QCD is requested in draw order."""
+
+    out = dict(histograms)
+    qcd_in_order = any(str(name).lower() == "qcd" for name in desired_order)
+
+    if not qcd_in_order or template is None:
+        return out
+
+    if not any(str(name).lower() == "qcd" for name in out):
+        out["QCD"] = np.zeros_like(template, dtype=float)
+
+    return out
