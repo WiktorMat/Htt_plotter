@@ -89,11 +89,14 @@ def render_mc_data_plots(
     process_draw_order: list[str],
     process_kinds: dict[str, str],
     get_color: Callable[[str], str],
+    qcd_config: dict[str, Any] | None = None,
     params: dict[str, Any] | None = None,
     logger: logging.Logger | None = None,
 ) -> None:
     for var, regions in (agreement or {}).items():
-        histograms = {"OS": regions.get("OS", {}), "SS": regions.get("SS", {})}
+        os_key = "OS_iso" if "OS_iso" in regions else "OS"
+        ss_key = "SS_iso" if "SS_iso" in regions else "SS"
+        histograms = dict(regions)
 
         def _sum_counts(region_dict: dict[str, dict[str, np.ndarray]], *, want_kind: str) -> float:
             total = 0.0
@@ -103,10 +106,10 @@ def render_mc_data_plots(
                 total += float(np.sum(h.get("counts", 0.0)))
             return total
 
-        data_os = _sum_counts(histograms["OS"], want_kind="data")
-        data_ss = _sum_counts(histograms["SS"], want_kind="data")
-        mc_os = _sum_counts(histograms["OS"], want_kind="mc")
-        mc_ss = _sum_counts(histograms["SS"], want_kind="mc")
+        data_os = _sum_counts(histograms.get(os_key, {}), want_kind="data")
+        data_ss = _sum_counts(histograms.get(ss_key, {}), want_kind="data")
+        mc_os = _sum_counts(histograms.get(os_key, {}), want_kind="mc")
+        mc_ss = _sum_counts(histograms.get(ss_key, {}), want_kind="mc")
 
         lumi = (params or {}).get("lumi") if params is not None else None
         if logger is not None and lumi is not None and data_os > 0:
@@ -131,13 +134,13 @@ def render_mc_data_plots(
                 mc_os / data_os,
             )
 
-        add_qcd_from_ss(
-            histograms,
-            {"add_qcd_from_ss": True, "qcd_ff": 1.0},
-            process_kinds,
-        )
+        qcd_settings = dict(qcd_config or {})
+        qcd_settings.setdefault("add_qcd_from_ss", True)
+        qcd_settings.setdefault("qcd_ff", 1.0)
 
-        samples = histograms["OS"]
+        add_qcd_from_ss(histograms, qcd_settings, process_kinds)
+
+        samples = histograms.get(os_key, {})
 
         data_counts = None
         data_sumw2 = None

@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from htt_plotter.backgrounds.qcd import ensure_qcd_placeholder
+from htt_plotter.backgrounds.qcd import qcd_region_names
 from htt_plotter.config.loader import load_configs
 from htt_plotter.core.draw_order import order_mapping_by_list, process_draw_order
 from htt_plotter.core.sample_processing import merge_sample_result, process_sample
@@ -248,7 +249,8 @@ class Plotter:
         if enable_resolution:
             resolution_hists = {pair: {} for pair in self.resolution_pairs}
         if enable_mc_data:
-            agreement = {v: {"OS": {}, "SS": {}} for v in self.contr_name}
+            region_names = qcd_region_names(self.plotter_config.get("qcd_method", "ss"))
+            agreement = {v: {region: {} for region in region_names} for v in self.contr_name}
 
         process_kinds: dict[str, str] = {}
         asymmetry_buffer: dict[str, dict[str, list[np.ndarray]]] = {}
@@ -389,6 +391,7 @@ class Plotter:
                 process_draw_order=self._process_draw_order,
                 process_kinds=process_kinds,
                 get_color=self._get_process_color,
+                qcd_config=self.plotter_config,
                 params=self.params,
                 logger=self.logger,
             )

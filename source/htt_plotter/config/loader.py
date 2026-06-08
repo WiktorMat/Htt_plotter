@@ -84,10 +84,15 @@ def load_configs(project_root: Path, config_name: str = "config_0"):
         spec.loader.exec_module(cfg)  # type: ignore[union-attr]
 
         selection_from_config = getattr(cfg, "SELECTION", {})
+        qcd_from_config = getattr(cfg, "QCD", {})
 
         if not isinstance(selection_from_config, dict):
             logger.warning("SELECTION in Config.py is not a dict → ignoring")
             selection_from_config = {}
+
+        if not isinstance(qcd_from_config, dict):
+            logger.warning("QCD in Config.py is not a dict → ignoring")
+            qcd_from_config = {}
 
     else:
         logger.warning("Config.py not found → using empty selection")
@@ -95,6 +100,15 @@ def load_configs(project_root: Path, config_name: str = "config_0"):
     # merge into plotter_config (Config.py overrides YAML if both exist)
     plotter_config.setdefault("selection", {})
     plotter_config["selection"].update(selection_from_config)
+
+    qcd_method = qcd_from_config.get("method")
+    plotter_config["qcd"] = qcd_from_config
+    if qcd_method is not None:
+        plotter_config["qcd_method"] = qcd_method
+        plotter_config.setdefault("plotter_runtime", {})
+        if isinstance(plotter_config["plotter_runtime"], dict):
+            plotter_config["plotter_runtime"]["qcd_method"] = qcd_method
+
     plotter_config.setdefault("plotting", {})
     plotting = plotter_config["plotting"]
 

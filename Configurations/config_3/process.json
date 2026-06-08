@@ -1,0 +1,71 @@
+{
+    "QCD": {
+        "samples": [],
+        "color": "tab:olive"
+    },
+    "tt": {
+        "samples": [
+            "TTto2L2Nu",
+            "TTtoLNu2Q",
+            "ST_tW_antitop_2L2Nu",
+            "ST_tW_antitop_LNu2Q",
+            "ST_tW_top_2L2Nu",
+            "ST_tW_top_LNu2Q"
+        ],
+        "color": "tab:purple"
+    },
+
+    "dibosons": {
+        "samples": [
+            "WW",
+            "WZ",
+            "ZZ"
+        ],
+        "color": "tab:brown"
+    },
+    "W+jets": {
+        "samples": [
+            "WtoMuNu_madgraphMLM",
+            "WtoTauNu_madgraphMLM"
+        ],
+        "color": "tab:red"
+    },
+    "DY_2Mu": {
+        "samples": [
+            "DYto2Mu_MLL_50_0J_amcatnloFXFX",
+            "DYto2Mu_MLL_50_1J_amcatnloFXFX",
+            "DYto2Mu_MLL_50_2J_amcatnloFXFX"
+        ],
+        "color": "tab:blue"
+    },
+    "DY_2Tau": {
+        "samples": [
+            "DYto2Tau_MLL_50_0J_amcatnloFXFX",
+            "DYto2Tau_MLL_50_1J_amcatnloFXFX",
+            "DYto2Tau_MLL_50_2J_amcatnloFXFX"
+        ],
+        "color": "tab:orange"
+    },
+    
+    "data": {
+    "samples": [
+        "Muon0_Run2024C",
+        "Muon0_Run2024D",
+        "Muon0_Run2024E",
+        "Muon0_Run2024F",
+        "Muon0_Run2024G",
+        "Muon0_Run2024H",
+        "Muon0_Run2024I_v1",
+        "Muon0_Run2024I_v2",
+        "Muon1_Run2024C",
+        "Muon1_Run2024D",
+        "Muon1_Run2024E",
+        "Muon1_Run2024F",
+        "Muon1_Run2024G",
+        "Muon1_Run2024H",
+        "Muon1_Run2024I_v1",
+        "Muon1_Run2024I_v2"
+    ],
+    "color": "tab:green"
+    }
+}

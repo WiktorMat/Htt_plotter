@@ -62,11 +62,24 @@
     },
     
     "data": {
-        "samples": [
-            "Muon0",
-            "Muon1"
-        ],
-        "color": "tab:green"
+    "samples": [
+        "Muon0_Run2024C",
+        "Muon0_Run2024D",
+        "Muon0_Run2024E",
+        "Muon0_Run2024F",
+        "Muon0_Run2024G",
+        "Muon0_Run2024H",
+        "Muon0_Run2024I_v1",
+        "Muon0_Run2024I_v2",
+        "Muon1_Run2024C",
+        "Muon1_Run2024D",
+        "Muon1_Run2024E",
+        "Muon1_Run2024F",
+        "Muon1_Run2024G",
+        "Muon1_Run2024H",
+        "Muon1_Run2024I_v1",
+        "Muon1_Run2024I_v2"
+    ],
+    "color": "tab:green"
     }
-    
 }

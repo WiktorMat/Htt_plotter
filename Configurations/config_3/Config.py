@@ -14,19 +14,26 @@ process = [
 
 QCD = {
     "method": "abcd",
+    "regions": {
+        "iso": {
+            "idDeepTau2018v2p5VSjet_2": [(">=", 5)],
+        },
+        "antiiso": {
+            "idDeepTau2018v2p5VSjet_2": [(">", 1), ("<", 5)],
+        },
+    },
 }
 
 SELECTION = {
-    "pt_1": (">", 25),
-    # "pt_2": (">", 20),
+    "pt_1": (">", 26),
+    "pt_2": (">", 25),
     "eta_1": ("abs<", 2.4),
     "eta_2": ("abs<", 2.5),
     "ip_z_1": ("<", 0.2),
     "ip_z_2": ("<", 0.2),
-    # "iso_1": ("<", 0.15),
-    "idDeepTau2018v2p5VSjet_2": (">=", 5),
+    "iso_1": ("<", 0.15),
     "idDeepTau2018v2p5VSe_2": (">=", 2),
     "idDeepTau2018v2p5VSmu_2": (">=", 4),
-    # "n_bjets": ("==", 2),
-    # "mt_1": (">", 75),
+    "n_bjets": ("==", 2),
+    # "mt_1": (">", 80),
 }

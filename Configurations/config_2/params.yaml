@@ -23,15 +23,15 @@ DYto2Mu-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
   filter_efficiency: 1.0
   xs: 116.47203023117962
 DYto2Tau-2Jets_Bin-0J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
-  eff: 394163979
+  eff: 197090067
   filter_efficiency: 1.0
   xs: 1664.6841730883225
 DYto2Tau-2Jets_Bin-1J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
-  eff: 198835949
+  eff: 99407527
   filter_efficiency: 1.0
   xs: 316.2403378778898
 DYto2Tau-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
-  eff: 70561081
+  eff: 35294184
   filter_efficiency: 1.0
   xs: 116.47203023117962
 TBbarQtoLNu-t-channel-4FS_TuneCP5_13p6TeV_powheg-madspin-pythia8:
@@ -39,7 +39,7 @@ TBbarQtoLNu-t-channel-4FS_TuneCP5_13p6TeV_powheg-madspin-pythia8:
   filter_efficiency: 1.0
   xs: 145.0
 TTto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8:
-  eff: 557204
+  eff: 233169567
   filter_efficiency: 1.0
   xs: 98.04387875606875
 TTto4Q_TuneCP5_13p6TeV_powheg-pythia8:
@@ -47,7 +47,7 @@ TTto4Q_TuneCP5_13p6TeV_powheg-pythia8:
   filter_efficiency: 1.0
   xs: 419.8071644141188
 TTtoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8:
-  eff: 480548627
+  eff: 240281605
   filter_efficiency: 1.0
   xs: 405.74895682981236
 TWminusto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8:
@@ -95,11 +95,11 @@ WtoENu-2Jets_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
   filter_efficiency: 1.0
   xs: 21141.699999999997
 WtoMuNu-2Jets_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
-  eff: 367370602
+  eff: 166366128
   filter_efficiency: 1.0
   xs: 21141.699999999997
 WtoTauNu-2Jets_TuneCP5_13p6TeV_amcatnloFXFX-pythia8:
-  eff: 340644484
+  eff: 91769502
   filter_efficiency: 1.0
   xs: 21141.699999999997
 ZZ_TuneCP5_13p6TeV_pythia8:

@@ -9,6 +9,7 @@ import numpy as np
 from htt_plotter.io.data_access import DataAccess
 from htt_plotter.physics.weights import compute_mc_weight
 from htt_plotter.plotting.accumulate import add_histogram
+from htt_plotter.backgrounds.qcd import qcd_method, qcd_region_columns, qcd_region_mask
 from htt_plotter.selection.selection import make_arrow_filter, selection_columns_used
 
 
@@ -50,6 +51,9 @@ def process_sample(
     do_mc_data = bool(payload.get("do_mc_data", True))
 
     asym_cfg = payload.get("asym_cfg") or {}
+    qcd_mode = qcd_method(plotter_config)
+    is_abcd = qcd_mode == "abcd"
+    qcd_cfg = plotter_config.get("qcd", {}) or {}
 
     runtime_cfg = plotter_config.get("plotter_runtime", {}) or {}
     prefetch_batches = int(runtime_cfg.get("io_prefetch_batches", 4) or 0)
@@ -73,6 +77,7 @@ def process_sample(
 
     selection_cfg = plotter_config.get("selection", {}) or {}
     selection_cols = selection_columns_used(selection_cfg)
+    effective_selection_cfg = dict(selection_cfg)
 
     needed: set[str] = set()
     if do_control:
@@ -89,10 +94,12 @@ def process_sample(
         needed.add("weight")
 
     needed |= {c for c in selection_cols if c in schema}
+    if is_abcd:
+        needed |= qcd_region_columns(qcd_cfg.get("regions", {}))
 
     columns = sorted(c for c in needed if c in schema)
 
-    filter_expr = make_arrow_filter(plotter_config, schema)
+    filter_expr = make_arrow_filter({**plotter_config, "selection": effective_selection_cfg}, schema)
 
     if kind == "data":
         mc_weight = 1.0
@@ -104,6 +111,8 @@ def process_sample(
     resolution_partial: dict[tuple[str, str], dict[str, np.ndarray]] = {}
     agreement_partial: dict[str, dict[str, dict[str, dict[str, np.ndarray]]]] = {}
     asymmetry_partial: dict[str, dict[str, np.ndarray]] = {}
+    qcd_regions = qcd_cfg.get("regions", {}) if isinstance(qcd_cfg.get("regions", {}), dict) else {}
+    region_names = ["OS_iso", "SS_iso", "OS_antiiso", "SS_antiiso"] if is_abcd else ["OS", "SS"]
 
     progress_interval_s = float(payload.get("progress_interval_s", 10.0) or 10.0)
 
@@ -173,10 +182,26 @@ def process_sample(
                 trigger_mask = (trg_single == 1) | (trg_cross == 1)
                 weights = to_numpy(batch, "weight")
 
-                by_var = agreement_partial.setdefault(var, {"OS": {}, "SS": {}})
+                by_var = agreement_partial.setdefault(var, {region: {} for region in region_names})
 
-                for region_name, region_mask in {"OS": os_flag == 1, "SS": os_flag == 0}.items():
-                    mask = region_mask & np.isfinite(values) # & trigger_mask
+                if is_abcd:
+                    iso_region = qcd_regions.get("iso")
+                    antiiso_region = qcd_regions.get("antiiso")
+                    if iso_region is None or antiiso_region is None:
+                        continue
+                    iso_mask = qcd_region_mask(batch, iso_region)
+                    antiiso_mask = qcd_region_mask(batch, antiiso_region)
+                    region_masks = {
+                        "OS_iso": (os_flag == 1) & iso_mask,
+                        "SS_iso": (os_flag == 0) & iso_mask,
+                        "OS_antiiso": (os_flag == 1) & antiiso_mask,
+                        "SS_antiiso": (os_flag == 0) & antiiso_mask,
+                    }
+                else:
+                    region_masks = {"OS": os_flag == 1, "SS": os_flag == 0}
+
+                for region_name, region_mask in region_masks.items():
+                    mask = region_mask & np.isfinite(values) & trigger_mask
                     if not np.any(mask):
                         continue
 
@@ -277,8 +302,7 @@ def merge_sample_result(
         for var, regions in (result.get("agreement") or {}).items():
             if var not in agreement:
                 continue
-            for region_name in ("OS", "SS"):
-                region = (regions or {}).get(region_name, {})
+            for region_name, region in (regions or {}).items():
                 for proc_name, hist in region.items():
                     target = agreement[var][region_name]
                     if proc_name not in target:

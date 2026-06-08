@@ -21,6 +21,6 @@ SELECTION = {
     "idDeepTau2018v2p5VSjet_2": (">=", 5),
     "idDeepTau2018v2p5VSe_2": (">=", 2),
     "idDeepTau2018v2p5VSmu_2": (">=", 4),
-    # "n_bjets": ("==", 0),
+    "n_bjets": ("==", 2),
     # "mt_1": (">", 75),
 }

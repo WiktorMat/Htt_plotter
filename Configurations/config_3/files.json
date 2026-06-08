@@ -1,0 +1,200 @@
+{
+    "DYto2Mu_MLL_50_0J_amcatnloFXFX": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/DYto2Mu_MLL_50_0J_amcatnloFXFX/nominal/merged.parquet"
+        ]
+    },
+    "DYto2Mu_MLL_50_1J_amcatnloFXFX": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/DYto2Mu_MLL_50_1J_amcatnloFXFX/nominal/merged.parquet"
+        ]
+    },
+    "DYto2Mu_MLL_50_2J_amcatnloFXFX": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/DYto2Mu_MLL_50_2J_amcatnloFXFX/nominal/merged.parquet"
+        ]
+    },
+    "DYto2Tau_MLL_50_0J_amcatnloFXFX": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/DYto2Tau_MLL_50_0J_amcatnloFXFX/nominal/merged.parquet"
+        ]
+    },
+    "DYto2Tau_MLL_50_1J_amcatnloFXFX": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/DYto2Tau_MLL_50_1J_amcatnloFXFX/nominal/merged.parquet"
+        ]
+    },
+    "DYto2Tau_MLL_50_2J_amcatnloFXFX": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/DYto2Tau_MLL_50_2J_amcatnloFXFX/nominal/merged.parquet"
+        ]
+    },
+    "ST_tW_antitop_2L2Nu": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/ST_tW_antitop_2L2Nu/nominal/merged.parquet"
+        ]
+    },
+    "ST_tW_antitop_LNu2Q": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/ST_tW_antitop_LNu2Q/nominal/merged.parquet"
+        ]
+    },
+    "ST_tW_top_2L2Nu": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/ST_tW_top_2L2Nu/nominal/merged.parquet"
+        ]
+    },
+    "ST_tW_top_LNu2Q": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/ST_tW_top_LNu2Q/nominal/merged.parquet"
+        ]
+    },
+    "TTto2L2Nu": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/TTto2L2Nu/nominal/merged.parquet"
+        ]
+    },
+    "TTtoLNu2Q": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/TTtoLNu2Q/nominal/merged.parquet"
+        ]
+    },
+    "WW": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/WW/nominal/merged.parquet"
+        ]
+    },
+    "WZ": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/WZ/nominal/merged.parquet"
+        ]
+    },
+    "WtoMuNu_madgraphMLM": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/WtoMuNu_madgraphMLM/nominal/merged.parquet"
+        ]
+    },
+    "WtoTauNu_madgraphMLM": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/WtoTauNu_madgraphMLM/nominal/merged.parquet"
+        ]
+    },
+    "ZZ": {
+        "kind": "mc",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/ZZ/nominal/merged.parquet"
+        ]
+    },
+    "Muon0_Run2024C": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon0_Run2024C/nominal/merged.parquet"
+        ]
+    },
+    "Muon0_Run2024D": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon0_Run2024D/nominal/merged.parquet"
+        ]
+    },
+    "Muon0_Run2024E": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon0_Run2024E/nominal/merged.parquet"
+        ]
+    },
+    "Muon0_Run2024F": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon0_Run2024F/nominal/merged.parquet"
+        ]
+    },
+    "Muon0_Run2024G": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon0_Run2024G/nominal/merged.parquet"
+        ]
+    },
+    "Muon0_Run2024H": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon0_Run2024H/nominal/merged.parquet"
+        ]
+    },
+    "Muon0_Run2024I_v1": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon0_Run2024I_v1/nominal/merged.parquet"
+        ]
+    },
+    "Muon0_Run2024I_v2": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon0_Run2024I_v2/nominal/merged.parquet"
+        ]
+    },
+    "Muon1_Run2024C": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon1_Run2024C/nominal/merged.parquet"
+        ]
+    },
+    "Muon1_Run2024D": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon1_Run2024D/nominal/merged.parquet"
+        ]
+    },
+    "Muon1_Run2024E": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon1_Run2024E/nominal/merged.parquet"
+        ]
+    },
+    "Muon1_Run2024F": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon1_Run2024F/nominal/merged.parquet"
+        ]
+    },
+    "Muon1_Run2024G": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon1_Run2024G/nominal/merged.parquet"
+        ]
+    },
+    "Muon1_Run2024H": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon1_Run2024H/nominal/merged.parquet"
+        ]
+    },
+    "Muon1_Run2024I_v1": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon1_Run2024I_v1/nominal/merged.parquet"
+        ]
+    },
+    "Muon1_Run2024I_v2": {
+        "kind": "data",
+        "files": [
+            "/eos/home-w/wmatyszk/data_mutau/Run3_2024/mt/Muon1_Run2024I_v2/nominal/merged.parquet"
+        ]
+    }
+}
