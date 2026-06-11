@@ -28,6 +28,10 @@ def render_families(
         from wham.render.resolution import render_resolution
 
         render_resolution(cfg, hists, outdir, only_vars, console)
+    if "ffcheck" in families:
+        from wham.render.ffcheck import render_ffcheck
+
+        render_ffcheck(cfg, hists, outdir, only_vars, console)
     if "cp" in families:
         from wham.render.cp import render_cp
 

@@ -73,6 +73,8 @@ def _families(cfg: AnalysisConfig, only: tuple[str, ...]) -> list[str]:
         configured.append("datamc")
     if cfg.plots.cp:
         configured.append("cp")
+    if cfg.plots.ffcheck:
+        configured.append("ffcheck")
     if cfg.plots.display3d is not None:
         configured.append("display3d")
     if not only:

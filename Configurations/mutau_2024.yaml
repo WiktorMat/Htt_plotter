@@ -67,6 +67,9 @@ variables:
   met_pt:  {bins: 40, range: [0, 200],  label: "$p_{T}^{miss}$ [GeV]"}
   met_phi: {bins: 63, range: [-3.14159, 3.14159], label: "$\\phi^{miss}$", kind: angle}
   dR:      {bins: 50, range: [0, 5],    label: "$\\Delta R(\\mu, \\tau_{h})$"}
+  # the muffin-baked BDT fake-factor score (data spans ~0-0.42, median ~0.09)
+  bdt_ff_qcd: {column: BDT_FF_score_QCD_sublead, bins: 45, range: [0, 0.45],
+               label: "BDT FF score (QCD)"}
   aco_mu_rho: {bins: 8, range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\mu\\rho)$", kind: angle}
 
 plots:
@@ -74,7 +77,9 @@ plots:
     - [pt_1, pt_2]
     - [mt_tot, m_vis]
   datamc:     [pt_1, pt_2, m_vis, m_vis_coarse, m_vis_varbins,
-               mt_tot, mt_1, mt_2, met_pt, met_phi, dR]
+               mt_tot, mt_1, mt_2, met_pt, met_phi, dR, bdt_ff_qcd]
+  # anti-iso QCD (data - MC) before/after the FF weight + weighted/raw ratio
+  ffcheck:    [bdt_ff_qcd, pt_2, m_vis, mt_tot, met_pt]
   cp:
     - {var: aco_mu_rho, even: wt_cp_sm, odd: wt_cp_ps}
   display3d:  {sample: "TTto2L2Nu", n_events: 3}

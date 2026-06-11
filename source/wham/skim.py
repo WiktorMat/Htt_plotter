@@ -95,7 +95,9 @@ def find_skim(analysis_name: str, sample: Sample, required: frozenset[str],
         manifest = _load_manifest(manifest_path)
         if manifest is None or manifest["src"] != src_sig:
             continue
-        if not required <= set(manifest["covers"]):
+        # appended score columns live in "columns" but not "covers"; either
+        # satisfies a requirement
+        if not required <= set(manifest["covers"]) | set(manifest["columns"]):
             continue
         if manifest.get("fake_factors") != ff_sig:
             continue
@@ -204,7 +206,8 @@ def prune_skims(analysis_name: str, samples: list[Sample], required: frozenset[s
                 continue
             entry = (float(manifest.get("created", 0.0)), manifest_path)
             valid.append(entry)
-            if required <= set(manifest["covers"]) and manifest.get("fake_factors") == ff_sig:
+            if (required <= set(manifest["covers"]) | set(manifest["columns"])
+                    and manifest.get("fake_factors") == ff_sig):
                 covering.append(entry)
         pool = covering or valid
         keep_key = max(pool)[1].stem if pool else None

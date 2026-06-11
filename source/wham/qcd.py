@@ -23,8 +23,8 @@ import numpy as np
 from wham.config import AnalysisConfig
 
 
-def _region_sums(h: Any, region: str, *, processes: list[str], data_proc: str,
-                 qcd_proc: str | None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def region_sums(h: Any, region: str, *, processes: list[str], data_proc: str,
+                qcd_proc: str | None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """(data, data_sumw2, mc, mc_sumw2) along the variable axis for one region."""
     nbins = h.axes[-1].size
     data = np.zeros(nbins)
@@ -74,7 +74,7 @@ def estimate_qcd(cfg: AnalysisConfig, datamc_hists: dict[Any, Any]) -> None:
                 continue
             qcd = {}
             for region in ("SS_iso", "OS_antiiso", "SS_antiiso"):
-                data, data_w2, mc, mc_w2 = _region_sums(
+                data, data_w2, mc, mc_w2 = region_sums(
                     h, region, processes=processes, data_proc=data_proc, qcd_proc=qcd_proc
                 )
                 qcd[region] = (np.maximum(data - mc, 0.0), data_w2 + mc_w2)
@@ -87,14 +87,14 @@ def estimate_qcd(cfg: AnalysisConfig, datamc_hists: dict[Any, Any]) -> None:
         elif method == "ff":
             if not {"OS_iso", "OS_antiiso"} <= set(regions):
                 continue
-            data, data_w2, mc, mc_w2 = _region_sums(
+            data, data_w2, mc, mc_w2 = region_sums(
                 h, "OS_antiiso", processes=processes, data_proc=data_proc, qcd_proc=qcd_proc
             )
             _set_qcd(h, "OS_iso", qcd_proc, np.maximum(data - mc, 0.0), data_w2 + mc_w2)
         else:
             if not {"OS", "SS"} <= set(regions):
                 continue
-            data, data_w2, mc, mc_w2 = _region_sums(
+            data, data_w2, mc, mc_w2 = region_sums(
                 h, "SS", processes=processes, data_proc=data_proc, qcd_proc=qcd_proc
             )
             ss_counts = np.maximum(data - mc, 0.0)

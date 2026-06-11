@@ -22,6 +22,7 @@ REGION_NOMINAL = "nominal"
 REGIONS_ABCD = ("OS_iso", "SS_iso", "OS_antiiso", "SS_antiiso")
 REGIONS_SS = ("OS", "SS")
 REGIONS_FF = ("OS_iso", "OS_antiiso")
+REGIONS_FFCHECK = ("OS_antiiso_raw", "OS_antiiso_ff")
 REGIONS_CP = ("even", "odd")
 
 HistKey = tuple[str, str]  # (family, variable-or-pair-name)
@@ -38,6 +39,8 @@ def regions_for(family: str, qcd_method: str) -> tuple[str, ...]:
         if qcd_method == "ff":
             return REGIONS_FF
         return REGIONS_SS
+    if family == "ffcheck":
+        return REGIONS_FFCHECK
     if family in ("cp", "fitcp"):
         return REGIONS_CP
     return (REGION_NOMINAL,)
@@ -63,6 +66,8 @@ class FillSpec:
     cp: tuple[tuple[str, str, str, dict], ...]       # (var, even_col, odd_col, varcfg)
     # like cp but with signal-region cuts (trigger & os & iso), for fitting
     fitcp: tuple[tuple[str, str, str, dict], ...] = ()
+    # anti-iso fills with and without the FF weight (qcd.method=ff only)
+    ffcheck: tuple[tuple[str, dict], ...] = ()
     # variables whose source column differs from their name (alias -> column)
     var_columns: tuple[tuple[str, str], ...] = ()
 
@@ -142,6 +147,9 @@ def build_fill_spec(
         for c in cfg.plots.fitcp
         if "fitcp" in families and want(c.var)
     )
+    ffcheck = tuple(
+        (v, vdump(v)) for v in cfg.plots.ffcheck if "ffcheck" in families and want(v)
+    )
 
     return FillSpec(
         selection=cfg.selection,
@@ -158,6 +166,7 @@ def build_fill_spec(
         datamc=datamc,
         cp=cp,
         fitcp=fitcp,
+        ffcheck=ffcheck,
         var_columns=tuple(
             (v, vcfg.column) for v, vcfg in cfg.variables.items() if vcfg.column
         ),
@@ -174,6 +183,7 @@ def hist_keys(spec: FillSpec) -> list[tuple[str, str, dict]]:
     out += [("datamc", v, vcfg) for v, vcfg in spec.datamc]
     out += [("cp", v, vcfg) for v, _, _, vcfg in spec.cp]
     out += [("fitcp", v, vcfg) for v, _, _, vcfg in spec.fitcp]
+    out += [("ffcheck", v, vcfg) for v, vcfg in spec.ffcheck]
     return out
 
 
@@ -359,6 +369,23 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
             for region, (rmask, w) in region_fills.items():
                 fill("datamc", var, vcfg, region, values, rmask & finite, w)
 
+    # ---- ffcheck: anti-iso fills with and without the per-event FF weight
+    if spec.ffcheck and spec.qcd_ff_weight is not None:
+        os_mask = region_part("os")
+        anti = region_part("anti")
+        if (os_mask is not None and anti is not None
+                and parse(spec.qcd_ff_weight).columns <= cols.names):
+            amask = base_mask() & os_mask & anti
+            ff_w = weights * cols.eval(spec.qcd_ff_weight).astype(float)
+            for var, vcfg in spec.ffcheck:
+                col = column(var)
+                if col not in cols:
+                    continue
+                values = cols.get(col)
+                mask = amask & cols.finite(col)
+                fill("ffcheck", var, vcfg, "OS_antiiso_raw", values, mask, weights)
+                fill("ffcheck", var, vcfg, "OS_antiiso_ff", values, mask, ff_w)
+
     # ---- cp: even/odd CP weights (MC only)
     if sample.kind != "data":
         for var, even_col, odd_col, vcfg in spec.cp:
@@ -482,4 +509,5 @@ def _restrict_spec(spec: FillSpec, keys: set[HistKey]) -> FillSpec:
         datamc=tuple(x for x in spec.datamc if ("datamc", x[0]) in keys),
         cp=tuple(x for x in spec.cp if ("cp", x[0]) in keys),
         fitcp=tuple(x for x in spec.fitcp if ("fitcp", x[0]) in keys),
+        ffcheck=tuple(x for x in spec.ffcheck if ("ffcheck", x[0]) in keys),
     )

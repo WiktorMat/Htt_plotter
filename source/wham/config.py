@@ -18,7 +18,7 @@ from pydantic import (
 
 from wham.expr import ExprError, parse
 
-FAMILIES = ("resolution", "datamc", "cp", "fitcp", "display3d")
+FAMILIES = ("resolution", "datamc", "cp", "fitcp", "ffcheck", "display3d")
 
 # Columns the 3D display needs if that family is configured.
 DISPLAY3D_COLUMNS = {"pt_1", "eta_1", "phi_1", "pt_2", "eta_2", "phi_2", "met_pt", "met_phi"}
@@ -170,6 +170,9 @@ class PlotsCfg(_Model):
     # CP hypothesis templates in the fit signal region; set programmatically
     # by `wham fit`, normally not written by hand.
     fitcp: list[CPPlotCfg] = []
+    # anti-iso QCD (data − MC) before vs after the per-event fake-factor
+    # weight, with a weighted/raw ratio panel (qcd.method=ff only)
+    ffcheck: list[str] = []
     display3d: Display3DCfg | None = None
 
 
@@ -228,6 +231,8 @@ class AnalysisConfig(_Model):
             used[c.var] = "plots.cp"
         for c in self.plots.fitcp:
             used[c.var] = "plots.fitcp"
+        for v in self.plots.ffcheck:
+            used[v] = "plots.ffcheck"
         missing = {v: fam for v, fam in used.items() if v not in self.variables}
         if missing:
             listed = ", ".join(f"'{v}' ({fam})" for v, fam in sorted(missing.items()))
@@ -235,12 +240,19 @@ class AnalysisConfig(_Model):
         return self
 
     @model_validator(mode="after")
+    def _ffcheck_needs_ff_method(self) -> "AnalysisConfig":
+        if self.plots.ffcheck and self.qcd.method != "ff":
+            raise ValueError("plots.ffcheck requires qcd.method=ff")
+        return self
+
+    @model_validator(mode="after")
     def _datamc_needs_data(self) -> "AnalysisConfig":
-        if self.plots.datamc:
+        if self.plots.datamc or self.plots.ffcheck:
             n_data = sum(1 for p in self.processes.values() if p.kind == "data")
             if n_data != 1:
                 raise ValueError(
-                    f"plots.datamc requires exactly one kind=data process, found {n_data}"
+                    "plots.datamc/ffcheck require exactly one kind=data process, "
+                    f"found {n_data}"
                 )
         n_qcd = sum(1 for p in self.processes.values() if p.kind == "qcd")
         if n_qcd > 1:
@@ -288,6 +300,7 @@ class AnalysisConfig(_Model):
         for reco, ref in self.plots.resolution:
             cols.update((self.column_of(reco), self.column_of(ref)))
         cols.update(self.column_of(v) for v in self.plots.datamc)
+        cols.update(self.column_of(v) for v in self.plots.ffcheck)
         for c in (*self.plots.cp, *self.plots.fitcp):
             cols.update((self.column_of(c.var), c.even, c.odd))
         if self.plots.display3d is not None:

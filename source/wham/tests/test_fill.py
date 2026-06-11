@@ -131,6 +131,39 @@ def test_fitcp_signal_region_templates(workspace: dict) -> None:
         ) == 0.0
 
 
+def test_ffcheck_raw_vs_weighted(workspace: dict) -> None:
+    cfg = load_config(workspace["yaml"])
+    qcd = cfg.qcd.model_copy(update={"method": "ff", "ff_weight": "pt_2 / 100"})
+    plots = cfg.plots.model_copy(update={"ffcheck": ["m_vis"]})
+    cfg = cfg.model_copy(update={"qcd": qcd, "plots": plots})
+    samples, _ = discover_samples(cfg)
+    skims = ensure_skims(cfg, samples, workers=1)
+    spec = build_fill_spec(cfg, families=["ffcheck"])
+
+    hists: dict = {}
+    for s in samples:
+        merge_hists(hists, fill_sample(s, skims[s.name], spec))
+
+    h = hists[("ffcheck", "m_vis")]
+    assert list(h.axes["region"]) == ["OS_antiiso_raw", "OS_antiiso_ff"]
+    sample = next(s for s in samples if s.kind == "data")
+    df = _reference_frame(sample, cfg)
+    anti = (
+        (df.trg == 1) & (df.os == 1) & (df.id_2 > 1) & (df.id_2 < 5)
+        & (df.m_vis >= 0) & (df.m_vis < 250)
+    )
+    expectations = {
+        "OS_antiiso_raw": df.w[anti].sum(),
+        "OS_antiiso_ff": (df.w * df.pt_2 / 100)[anti].sum(),
+    }
+    for region, expected in expectations.items():
+        got = float(
+            h[{"process": "data", "region": region, "variation": "nominal"}]
+            .view()["value"].sum()
+        )
+        assert got == pytest.approx(float(expected), rel=1e-9), region
+
+
 def test_fitcp_cache_key_includes_weight_columns(workspace: dict) -> None:
     from wham.config import CPPlotCfg
     from wham.fill import spec_extras

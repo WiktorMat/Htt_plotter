@@ -131,6 +131,13 @@ qcd:
   ff_weight: "BDT_FF_score_QCD_sublead"
 ```
 
+To see what the weighting does, plot the score itself (a `variables:` entry
+with `column: BDT_FF_score_QCD_sublead`, range ~[0, 0.45]) and list variables
+under `plots.ffcheck:`. Each ffcheck plot overlays the anti-iso `data − MC`
+shape raw and FF-weighted (the latter is exactly the QCD estimate), with a
+weighted/raw ratio panel — the effective per-bin fake factor. For the score
+variable itself that ratio must track the bin centers, a built-in closure check.
+
 Two model layouts are recognized: `<models>/<channel>_<process>/best_model.json`
 (our muffin_trainings) and `<models>/model_<channel>_<process>/model.json`
 (higgs-dna's BDTFFModel); `temperature_scaling_results.json` next to the model
