@@ -151,7 +151,7 @@ def render_fit(fit: FitConfig, cfg: AnalysisConfig, fitdir: Path, console=None) 
 
         xlabel = r"$\alpha$ [rad]" if fit.poi() == "alpha" else r"$r$"
         ax.set_xlabel(xlabel)
-        ax.set_ylabel(r"$2\Delta\,\mathrm{ln}\,L$")
+        ax.set_ylabel(r"$-2\,\Delta\,\mathrm{ln}\,L$")
         ax.set_ylim(bottom=0)
         ax.text(0.03, 0.97, f"best fit {fit.poi()} = {best:.3f}",
                 transform=ax.transAxes, ha="left", va="top", fontsize=14)

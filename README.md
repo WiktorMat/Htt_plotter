@@ -129,7 +129,7 @@ systematics:
 ABCD, all through the same caches as plotting), exports `datacard.txt` +
 `shapes.root` (`$CHANNEL/$PROCESS`, `data_obs` conventions), runs
 `text2workspace.py`, `FitDiagnostics` (postfit shapes) and a `MultiDimFit`
-NLL scan in the container, then renders prefit/postfit stacks and the 2ΔlnL
+NLL scan in the container, then renders prefit/postfit stacks and the −2ΔlnL
 scan. Outputs go to `plots/<analysis>/fit/<fitname>/`.
 
 Every stage is keyed: editing a systematic re-exports and refits in seconds
