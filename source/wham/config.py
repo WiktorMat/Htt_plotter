@@ -82,16 +82,23 @@ class ProcessCfg(_Model):
 
 
 class QCDCfg(_Model):
-    method: Literal["ss", "abcd"] = "ss"
+    method: Literal["ss", "abcd", "ff"] = "ss"
     os: str = "os == 1"
     iso: str | None = None
     antiiso: str | None = None
-    ff: float = 1.0
+    ff: float = 1.0  # ss method: flat SS->OS extrapolation factor
+    # ff method: per-event fake-factor weight expression for the anti-iso
+    # region (e.g. a BDT_FF_score_* column added by scripts/tools/muffin.py)
+    ff_weight: str | None = None
 
     @model_validator(mode="after")
-    def _abcd_needs_regions(self) -> "QCDCfg":
+    def _method_needs_fields(self) -> "QCDCfg":
         if self.method == "abcd" and not (self.iso and self.antiiso):
             raise ValueError("qcd.method=abcd requires both 'iso' and 'antiiso' expressions")
+        if self.method == "ff" and not (self.iso and self.antiiso and self.ff_weight):
+            raise ValueError(
+                "qcd.method=ff requires 'iso', 'antiiso' and 'ff_weight' expressions"
+            )
         return self
 
 
@@ -110,6 +117,44 @@ class CPPlotCfg(_Model):
 class Display3DCfg(_Model):
     sample: str
     n_events: int = Field(default=1, gt=0)
+
+
+class FakeFactorsCfg(_Model):
+    """Apply BDT fake-factor models at skim time (see wham/muffin.py)."""
+
+    models: Path                      # the BDTFFModel directory
+    channel: str = "mt"
+    processes: list[str] = ["QCD"]
+    era: str | None = None            # a trained era, e.g. Run3_2022EE
+    era_label: int | None = None      # raw label override (2024 borrowing 2023BPix etc.)
+    systematics: bool = False         # also write the _up/_down score columns
+
+    @model_validator(mode="after")
+    def _era_resolvable(self) -> "FakeFactorsCfg":
+        from wham.muffin import ERA_LABELS
+
+        if (self.era is None) == (self.era_label is None):
+            raise ValueError("fake_factors needs exactly one of 'era' or 'era_label'")
+        if self.era is not None and self.era not in ERA_LABELS:
+            raise ValueError(
+                f"fake_factors.era {self.era!r} not trained; known: {sorted(ERA_LABELS)}. "
+                "Use era_label to borrow the closest era explicitly."
+            )
+        if not self.models.is_dir():
+            raise ValueError(f"fake_factors.models does not exist: {self.models}")
+        from wham.muffin import model_file
+
+        for process in self.processes:
+            try:
+                model_file(self.models, self.channel, process)
+            except FileNotFoundError as e:
+                raise ValueError(f"fake_factors: {e}") from None
+        return self
+
+    def resolved_era_label(self) -> int:
+        from wham.muffin import ERA_LABELS
+
+        return ERA_LABELS[self.era] if self.era is not None else self.era_label
 
 
 class StyleCfg(_Model):
@@ -142,6 +187,7 @@ class AnalysisConfig(_Model):
     variables: dict[str, VariableCfg]
     plots: PlotsCfg = PlotsCfg()
     style: StyleCfg = StyleCfg()
+    fake_factors: FakeFactorsCfg | None = None
 
     # ---- validators -------------------------------------------------
 
@@ -161,6 +207,7 @@ class AnalysisConfig(_Model):
             ("qcd.os", self.qcd.os),
             ("qcd.iso", self.qcd.iso),
             ("qcd.antiiso", self.qcd.antiiso),
+            ("qcd.ff_weight", self.qcd.ff_weight),
         ]:
             if src is None:
                 continue
@@ -235,7 +282,7 @@ class AnalysisConfig(_Model):
         """Union of every column any configured fill could touch."""
         cols: set[str] = {"weight", "os"}
         for src in (self.selection, self.trigger, self.weight,
-                    self.qcd.os, self.qcd.iso, self.qcd.antiiso):
+                    self.qcd.os, self.qcd.iso, self.qcd.antiiso, self.qcd.ff_weight):
             if src:
                 cols |= parse(src).columns
         for reco, ref in self.plots.resolution:
@@ -245,6 +292,10 @@ class AnalysisConfig(_Model):
             cols.update((self.column_of(c.var), c.even, c.odd))
         if self.plots.display3d is not None:
             cols |= DISPLAY3D_COLUMNS
+        if self.fake_factors is not None:
+            from wham.muffin import source_columns
+
+            cols |= source_columns()
         return frozenset(cols)
 
 

@@ -33,6 +33,10 @@ def cache_key(
     *,
     extra: dict | None = None,
 ) -> str:
+    # new optional qcd fields are dropped when unset so old keys stay valid
+    qcd_payload = cfg.qcd.model_dump()
+    if qcd_payload.get("ff_weight") is None:
+        del qcd_payload["ff_weight"]
     payload = {
         "sources": {
             s.name: skims[s.name].src_signature for s in samples if s.name in skims
@@ -40,7 +44,7 @@ def cache_key(
         "selection": cfg.selection,
         "trigger": cfg.trigger,
         "weight": cfg.weight,
-        "qcd": cfg.qcd.model_dump(),
+        "qcd": qcd_payload,
         "processes": {
             n: {"kind": p.kind, "samples": sorted(
                 s.name for s in samples if s.process == n)}
@@ -56,6 +60,10 @@ def cache_key(
     if vcfg.get("column"):
         # conditional so keys of plain (non-aliased) variables stay stable
         payload["binning"]["column"] = vcfg["column"]
+    if cfg.fake_factors is not None:
+        from wham.muffin import signature
+
+        payload["fake_factors"] = signature(cfg.fake_factors)
     if extra:
         # e.g. CP weight columns; added conditionally so keys of histograms
         # without extras (the vast majority) stay stable.

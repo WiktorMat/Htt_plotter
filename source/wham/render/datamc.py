@@ -22,7 +22,7 @@ from wham.render.common import (
 
 
 def signal_region(qcd_method: str) -> str:
-    return "OS_iso" if qcd_method == "abcd" else "OS"
+    return "OS" if qcd_method == "ss" else "OS_iso"
 
 
 def render_datamc(

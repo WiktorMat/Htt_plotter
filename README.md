@@ -106,6 +106,38 @@ Notes:
 - Resolution binning: define a variable named `<reco>_from_<ref>` to customize,
   otherwise defaults apply ((reco−ref)/ref in [−2, 2]; Δ wrapped to [−π, π] for angles).
 
+## BDT fake factors (muffin)
+
+`wham/muffin.py` (adapted from higgs-dna's `add_bdtfakefactorscores.py`) applies
+the XGBoost BDT fake-factor models at skim time — the EOS inputs are never
+modified. A `fake_factors:` block in the analysis YAML makes the skims carry
+`BDT_FF_score_<process>_sublead` columns (scores for the τ<sub>h</sub> leg),
+which then behave like any other column: plot them as variables, or drive a
+fake-factor QCD estimate:
+
+```yaml
+fake_factors:
+  models: /eos/home-h/haawedik/shared-hagop-wiktor-data/muffin_trainings
+  channel: mt
+  processes: [QCD]          # also: Wjets, WjetsMC, ttbarMC (when trained)
+  era_label: 0              # must match the label used in training
+  # era: Run3_2023BPix      # alternative: a higgs-dna trained era by name
+  # systematics: true       # also write _BkgSub/_Modelling/..._up/_down columns
+
+qcd:
+  method: ff                # OS anti-iso data weighted per event by ff_weight,
+  iso: "..."                # genuine-tau MC subtracted with the same weight
+  antiiso: "..."
+  ff_weight: "BDT_FF_score_QCD_sublead"
+```
+
+Two model layouts are recognized: `<models>/<channel>_<process>/best_model.json`
+(our muffin_trainings) and `<models>/model_<channel>_<process>/model.json`
+(higgs-dna's BDTFFModel); `temperature_scaling_results.json` next to the model
+is picked up automatically. Skims are keyed on the model files, so retraining
+triggers exactly one skim rebuild; removing the block returns to the previous
+skims untouched.
+
 ## Cleaning caches
 
 ```bash

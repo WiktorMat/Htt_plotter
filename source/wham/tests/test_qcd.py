@@ -74,6 +74,23 @@ def test_ss_method(workspace: dict) -> None:
     assert np.allclose(variance, np.array([140.0, 30.0, 10.0]) * 1.5**2)
 
 
+def test_ff_method(workspace: dict) -> None:
+    cfg = load_config(workspace["yaml"])
+    cfg = cfg.model_copy(
+        update={"qcd": cfg.qcd.model_copy(update={"method": "ff", "ff_weight": "bdt"})}
+    )
+    h = _hist(regions=["OS_iso", "OS_antiiso"])
+    # OS_antiiso was filled with per-event FF weights already
+    _set(h, "data", "OS_antiiso", [100.0, 10.0, 5.0], sumw2=[60.0, 6.0, 3.0])
+    _set(h, "TT", "OS_antiiso", [40.0, 20.0, 5.0], sumw2=[25.0, 12.0, 3.0])
+
+    estimate_qcd(cfg, {("datamc", "x"): h})
+
+    counts, variance = _get(h, "QCD", "OS_iso")
+    assert np.allclose(counts, [60.0, 0.0, 0.0])  # clip(data - mc, 0)
+    assert np.allclose(variance, [85.0, 18.0, 6.0])
+
+
 def test_qcd_noop_without_qcd_process(workspace: dict) -> None:
     cfg = load_config(workspace["yaml"])
     no_qcd = {n: p for n, p in cfg.processes.items() if p.kind != "qcd"}

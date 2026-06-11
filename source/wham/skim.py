@@ -82,7 +82,8 @@ def _info_from_manifest(sample: str, manifest_path: Path, manifest: dict) -> Ski
     )
 
 
-def find_skim(analysis_name: str, sample: Sample, required: frozenset[str]) -> SkimInfo | None:
+def find_skim(analysis_name: str, sample: Sample, required: frozenset[str],
+              ff_sig: dict | None = None) -> SkimInfo | None:
     """Newest existing skim that matches the source and covers the columns."""
     directory = skim_dir(analysis_name, sample)
     if not directory.is_dir():
@@ -96,6 +97,8 @@ def find_skim(analysis_name: str, sample: Sample, required: frozenset[str]) -> S
             continue
         if not required <= set(manifest["covers"]):
             continue
+        if manifest.get("fake_factors") != ff_sig:
+            continue
         created = float(manifest.get("created", 0.0))
         if best is None or created > best[0]:
             best = (created, manifest_path, manifest)
@@ -105,7 +108,8 @@ def find_skim(analysis_name: str, sample: Sample, required: frozenset[str]) -> S
     return _info_from_manifest(sample.name, best[1], best[2])
 
 
-def build_skim(analysis_name: str, sample: Sample, required: frozenset[str]) -> SkimInfo:
+def build_skim(analysis_name: str, sample: Sample, required: frozenset[str],
+               fake_factors=None, ff_sig: dict | None = None) -> SkimInfo:
     """Read requested columns from the source and rewrite locally (crash-safe)."""
     import pyarrow.dataset as ds
     import pyarrow.parquet as pq
@@ -117,9 +121,17 @@ def build_skim(analysis_name: str, sample: Sample, required: frozenset[str]) -> 
     dataset = ds.dataset(str(sample.path), format=coalesced_parquet_format())
     table = dataset.to_table(columns=columns)
 
+    if fake_factors is not None:
+        from wham.muffin import augment_table
+
+        table = augment_table(fake_factors, table)
+
     directory = skim_dir(analysis_name, sample)
     directory.mkdir(parents=True, exist_ok=True)
-    key = short_key({"src": src_sig, "covers": sorted(required)})
+    key_payload: dict = {"src": src_sig, "covers": sorted(required)}
+    if ff_sig is not None:  # conditional so keys without fake factors stay stable
+        key_payload["fake_factors"] = ff_sig
+    key = short_key(key_payload)
     final = directory / f"{key}.parquet"
     tmp = directory / f"{key}.parquet.tmp.{os.getpid()}"
     pq.write_table(table, tmp, row_group_size=ROW_GROUP_SIZE, compression="snappy")
@@ -128,11 +140,13 @@ def build_skim(analysis_name: str, sample: Sample, required: frozenset[str]) -> 
     manifest = {
         "src": src_sig,
         "covers": sorted(required),
-        "columns": columns,
+        "columns": table.column_names,  # includes appended score columns
         "rows": table.num_rows,
         "created": time.time(),
         "version": __version__,
     }
+    if ff_sig is not None:
+        manifest["fake_factors"] = ff_sig
     (directory / f"{key}.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
     return _info_from_manifest(sample.name, directory / f"{key}.json", manifest)
 
@@ -146,19 +160,23 @@ def ensure_skims(
     on_progress=None,
 ) -> dict[str, SkimInfo]:
     """Return a valid skim per sample, building missing ones in parallel."""
+    from wham.muffin import signature
+
     required = cfg.required_columns()
+    ff_sig = signature(cfg.fake_factors)
 
     skims: dict[str, SkimInfo] = {}
     to_build: list[Sample] = []
     for sample in samples:
-        info = None if force else find_skim(cfg.name, sample, required)
+        info = None if force else find_skim(cfg.name, sample, required, ff_sig)
         if info is None:
             to_build.append(sample)
         else:
             skims[sample.name] = info
 
     if to_build:
-        jobs = [(cfg.name, sample, required) for sample in to_build]
+        jobs = [(cfg.name, sample, required, cfg.fake_factors, ff_sig)
+                for sample in to_build]
         for info in run_parallel(
             build_skim, jobs, workers=workers, size_of=lambda j: j[1].size
         ):
@@ -168,7 +186,8 @@ def ensure_skims(
     return skims
 
 
-def prune_skims(analysis_name: str, samples: list[Sample], required: frozenset[str]) -> int:
+def prune_skims(analysis_name: str, samples: list[Sample], required: frozenset[str],
+                ff_sig: dict | None = None) -> int:
     """Keep one skim per sample (newest covering `required`, else newest valid);
     delete the rest. Returns bytes freed."""
     freed = 0
@@ -185,7 +204,7 @@ def prune_skims(analysis_name: str, samples: list[Sample], required: frozenset[s
                 continue
             entry = (float(manifest.get("created", 0.0)), manifest_path)
             valid.append(entry)
-            if required <= set(manifest["covers"]):
+            if required <= set(manifest["covers"]) and manifest.get("fake_factors") == ff_sig:
                 covering.append(entry)
         pool = covering or valid
         keep_key = max(pool)[1].stem if pool else None

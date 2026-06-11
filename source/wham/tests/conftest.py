@@ -24,6 +24,17 @@ def _sample_table(rng: np.random.Generator, *, data: bool = False) -> pa.Table:
         "id_2": rng.integers(0, 8, n).astype(np.int32),
         "trg": rng.integers(0, 2, n).astype(np.int32),
         "weight": rng.uniform(0.5, 1.5, n),
+        # tau_h-leg columns the BDT fake-factor models read (wham/muffin.py)
+        "eta_2": rng.uniform(-2.5, 2.5, n),
+        "phi_2": rng.uniform(-np.pi, np.pi, n),
+        "charge_2": rng.choice([-1, 1], n).astype(np.int32),
+        "decayMode_2": rng.choice([0, 1, 10, 11], n).astype(np.int32),
+        "decayModePNet_2": rng.choice([0, 1, 10, 11], n).astype(np.int32),
+        "jpt_2": rng.uniform(15, 120, n),
+        "n_jets": rng.integers(0, 5, n).astype(np.int32),
+        "n_bjets": rng.integers(0, 3, n).astype(np.int32),
+        "met_pt": rng.uniform(0, 150, n),
+        "met_dphi_2": rng.uniform(-np.pi, np.pi, n),
     }
     if not data:
         cols["wt_cp_sm"] = rng.uniform(0, 2, n)

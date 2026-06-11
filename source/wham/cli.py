@@ -115,10 +115,12 @@ def main() -> None:
 @click.option("--yields", "show_yields", is_flag=True, help="Show per-process yields from the histogram cache.")
 def inspect(config_path: str, show_columns: bool, show_yields: bool) -> None:
     """Validate the config and show samples, skims and (optionally) yields."""
+    from wham.muffin import signature as muffin_signature
     from wham.skim import find_skim
 
     cfg, samples = _load(config_path)
     required = cfg.required_columns()
+    ff_sig = muffin_signature(cfg.fake_factors)
 
     table = Table(title=f"{cfg.name} — {len(samples)} samples")
     table.add_column("Sample")
@@ -129,7 +131,7 @@ def inspect(config_path: str, show_columns: bool, show_yields: bool) -> None:
     table.add_column("Skim")
 
     for s in samples:
-        info = find_skim(cfg.name, s, required)
+        info = find_skim(cfg.name, s, required, ff_sig)
         scale = sample_scale(s, cfg.lumi)
         table.add_row(
             s.name,
@@ -191,6 +193,7 @@ def inspect(config_path: str, show_columns: bool, show_yields: bool) -> None:
 @click.option("--prune", is_flag=True, help="Delete superseded skims afterwards.")
 def skim(config_path: str, workers: int, force: bool, prune: bool) -> None:
     """Build/refresh the local column-pruned skim cache."""
+    from wham.muffin import signature as muffin_signature
     from wham.skim import ensure_skims, prune_skims
 
     cfg, samples = _load(config_path)
@@ -215,7 +218,8 @@ def skim(config_path: str, workers: int, force: bool, prune: bool) -> None:
     )
 
     if prune:
-        freed = prune_skims(cfg.name, samples, cfg.required_columns())
+        freed = prune_skims(cfg.name, samples, cfg.required_columns(),
+                        muffin_signature(cfg.fake_factors))
         console.print(f"Pruned {freed / 1e6:,.0f} MB of stale skims")
 
 
@@ -256,10 +260,12 @@ def clean(config_path: str, wipe_hists: bool, wipe_skims: bool, wipe_all: bool) 
             console.print(f"  [green]removed[/green] {target} ({size / 1e9:.2f} GB)")
         return
 
+    from wham.muffin import signature as muffin_signature
     from wham.skim import prune_skims
 
     cfg, samples = _load(config_path)
-    freed = prune_skims(cfg.name, samples, cfg.required_columns())
+    freed = prune_skims(cfg.name, samples, cfg.required_columns(),
+                        muffin_signature(cfg.fake_factors))
     console.print(f"Pruned {freed / 1e6:,.0f} MB of superseded skims")
     for sub in ("skims", "hists"):
         console.print(f"  {root / sub}: {_dir_size(root / sub) / 1e9:.2f} GB")
@@ -316,16 +322,18 @@ def plot(config_path: str, only: tuple[str, ...], only_vars: tuple[str, ...],
 def render(config_path: str, only: tuple[str, ...], only_vars: tuple[str, ...]) -> None:
     """Re-render plots from cached histograms only (seconds; no event data)."""
     from wham.fill import fill_all
+    from wham.muffin import signature as muffin_signature
     from wham.render import render_families
     from wham.skim import find_skim
 
     cfg, samples = _load(config_path)
     families = _families(cfg, only)
     required = cfg.required_columns()
+    ff_sig = muffin_signature(cfg.fake_factors)
 
     skims = {}
     for s in samples:
-        info = find_skim(cfg.name, s, required)
+        info = find_skim(cfg.name, s, required, ff_sig)
         if info is None:
             console.print(
                 f"[red bold]No skim for {s.name}[/red bold] — histogram cache cannot be "

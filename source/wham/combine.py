@@ -58,7 +58,7 @@ def dc_name(process: str) -> str:
 
 
 def signal_region(cfg: AnalysisConfig) -> str:
-    return "OS_iso" if cfg.qcd.method == "abcd" else "OS"
+    return "OS" if cfg.qcd.method == "ss" else "OS_iso"
 
 
 # ------------------------------------------------------------- templates

@@ -8,6 +8,10 @@ abcd method (per bin):
     tf        = clip(data-mc, 0)_OS_antiiso / clip(data-mc, 0)_SS_antiiso
     QCD_OS    = clip(data-mc, 0)_SS_iso * tf          sumw2_SS_iso * tf^2
     QCD_SS    = clip(data-mc, 0)_SS_iso               (kept for inspection)
+ff method (per bin):
+    QCD_OS_iso = clip(data-mc, 0)_OS_antiiso
+    where the OS_antiiso fills already carry the per-event qcd.ff_weight,
+    so the subtraction removes genuine-tau MC promoted by the same weight.
 """
 
 from __future__ import annotations
@@ -80,6 +84,13 @@ def estimate_qcd(cfg: AnalysisConfig, datamc_hists: dict[Any, Any]) -> None:
             sumw2 = qcd["SS_iso"][1] * tf**2
             _set_qcd(h, "OS_iso", qcd_proc, counts, sumw2)
             _set_qcd(h, "SS_iso", qcd_proc, qcd["SS_iso"][0], qcd["SS_iso"][1])
+        elif method == "ff":
+            if not {"OS_iso", "OS_antiiso"} <= set(regions):
+                continue
+            data, data_w2, mc, mc_w2 = _region_sums(
+                h, "OS_antiiso", processes=processes, data_proc=data_proc, qcd_proc=qcd_proc
+            )
+            _set_qcd(h, "OS_iso", qcd_proc, np.maximum(data - mc, 0.0), data_w2 + mc_w2)
         else:
             if not {"OS", "SS"} <= set(regions):
                 continue

@@ -21,6 +21,7 @@ from wham.skim import SkimInfo, read_skim
 REGION_NOMINAL = "nominal"
 REGIONS_ABCD = ("OS_iso", "SS_iso", "OS_antiiso", "SS_antiiso")
 REGIONS_SS = ("OS", "SS")
+REGIONS_FF = ("OS_iso", "OS_antiiso")
 REGIONS_CP = ("even", "odd")
 
 HistKey = tuple[str, str]  # (family, variable-or-pair-name)
@@ -32,7 +33,11 @@ def resolution_name(reco: str, ref: str) -> str:
 
 def regions_for(family: str, qcd_method: str) -> tuple[str, ...]:
     if family == "datamc":
-        return REGIONS_ABCD if qcd_method == "abcd" else REGIONS_SS
+        if qcd_method == "abcd":
+            return REGIONS_ABCD
+        if qcd_method == "ff":
+            return REGIONS_FF
+        return REGIONS_SS
     if family in ("cp", "fitcp"):
         return REGIONS_CP
     return (REGION_NOMINAL,)
@@ -49,6 +54,7 @@ class FillSpec:
     qcd_os: str
     qcd_iso: str | None
     qcd_antiiso: str | None
+    qcd_ff_weight: str | None
     lumi: float
     processes: tuple[str, ...]            # category axis content, fixed order
     # requested fills
@@ -145,6 +151,7 @@ def build_fill_spec(
         qcd_os=cfg.qcd.os,
         qcd_iso=cfg.qcd.iso,
         qcd_antiiso=cfg.qcd.antiiso,
+        qcd_ff_weight=cfg.qcd.ff_weight,
         lumi=cfg.lumi,
         processes=tuple(cfg.processes.keys()),
         resolution=resolution,
@@ -300,36 +307,48 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
         return trig if trig is not None else np.ones(n, dtype=bool)
 
     def sr_mask() -> np.ndarray | None:
-        """Signal region: trigger & OS (& iso for abcd)."""
+        """Signal region: trigger & OS (& iso for abcd/ff)."""
         os_mask = region_part("os")
         if os_mask is None:
             return None
         sr = base_mask() & os_mask
-        if spec.qcd_method == "abcd":
+        if spec.qcd_method in ("abcd", "ff"):
             iso = region_part("iso")
             if iso is None:
                 return None
             sr = sr & iso
         return sr
 
-    # ---- datamc: trigger x charge x isolation regions
+    # ---- datamc: trigger x charge x isolation regions (mask, weights) each
     if spec.datamc and region_part("os") is not None:
         base = base_mask()
         os_mask = region_part("os")
 
-        region_masks: dict[str, np.ndarray] = {}
+        region_fills: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         if spec.qcd_method == "abcd":
             iso = region_part("iso")
             anti = region_part("anti")
             if iso is not None and anti is not None:
-                region_masks = {
-                    "OS_iso": base & os_mask & iso,
-                    "SS_iso": base & ~os_mask & iso,
-                    "OS_antiiso": base & os_mask & anti,
-                    "SS_antiiso": base & ~os_mask & anti,
+                region_fills = {
+                    "OS_iso": (base & os_mask & iso, weights),
+                    "SS_iso": (base & ~os_mask & iso, weights),
+                    "OS_antiiso": (base & os_mask & anti, weights),
+                    "SS_antiiso": (base & ~os_mask & anti, weights),
                 }
+        elif spec.qcd_method == "ff":
+            iso = region_part("iso")
+            anti = region_part("anti")
+            if iso is not None and anti is not None:
+                region_fills = {"OS_iso": (base & os_mask & iso, weights)}
+                # anti-iso entries carry the per-event fake-factor weight
+                if parse(spec.qcd_ff_weight).columns <= cols.names:
+                    region_fills["OS_antiiso"] = (
+                        base & os_mask & anti,
+                        weights * cols.eval(spec.qcd_ff_weight).astype(float),
+                    )
         else:
-            region_masks = {"OS": base & os_mask, "SS": base & ~os_mask}
+            region_fills = {"OS": (base & os_mask, weights),
+                            "SS": (base & ~os_mask, weights)}
 
         for var, vcfg in spec.datamc:
             col = column(var)
@@ -337,8 +356,8 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
                 continue
             values = cols.get(col)
             finite = cols.finite(col)
-            for region, rmask in region_masks.items():
-                fill("datamc", var, vcfg, region, values, rmask & finite, weights)
+            for region, (rmask, w) in region_fills.items():
+                fill("datamc", var, vcfg, region, values, rmask & finite, w)
 
     # ---- cp: even/odd CP weights (MC only)
     if sample.kind != "data":
