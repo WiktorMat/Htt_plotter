@@ -402,29 +402,73 @@ def render(config_path: str, only: tuple[str, ...], only_vars: tuple[str, ...]) 
 
 
 @main.command()
-@click.argument("config_path", required=False)
+@click.argument("target", required=False)
+@click.option("--signal", default=None,
+              help="Signal process for direct variable fits (default: top of the stack).")
+@click.option("--asimov", is_flag=True,
+              help="Direct variable fits: fit the Asimov dataset instead of data.")
 @click.option("--workers", default=6, show_default=True)
 @click.option("--no-cache", is_flag=True, help="Rebuild skims and histograms from scratch.")
 @click.option("--force", is_flag=True, help="Rerun all combine stages even if fresh.")
 @click.option("--datacard-only", is_flag=True, help="Stop after exporting datacard + shapes.")
 @click.option("--no-render", is_flag=True, help="Skip prefit/postfit/NLL plots.")
-def fit(config_path: str, workers: int, no_cache: bool, force: bool,
-        datacard_only: bool, no_render: bool) -> None:
-    """Datacard export + Combine fit (FitDiagnostics + NLL scan), cache-aware."""
+def fit(target: str, signal: str, asimov: bool, workers: int, no_cache: bool,
+        force: bool, datacard_only: bool, no_render: bool) -> None:
+    """Datacard export + Combine fit (FitDiagnostics + NLL scan), cache-aware.
+
+    TARGET is a fit YAML (Configurations/fits/<name>.yaml) or simply a
+    variable of the analysis config (e.g. `wham fit m_vis`), which runs a
+    default rate fit: signal strength of the top stack process, lumi lnN on
+    simulation, free-floating QCD normalization, observed data.
+    """
     import time as _time
 
     from wham.combine import run_fit
     from wham.fill import build_fill_spec, fill_all, hist_keys, spec_extras
-    from wham.fitconfig import augmented_analysis, load_fit_config, resolve_fit_config
+    from wham.fitconfig import (augmented_analysis, load_fit_config, match_variable,
+                                resolve_fit_config, synthesize_fit_config)
     from wham.histcache import cache_key
     from wham.skim import ensure_skims
 
+    fit_path = None
     try:
-        fit_path = resolve_fit_config(config_path)
-        fit_cfg, base_cfg = load_fit_config(fit_path)
-    except Exception as e:
-        console.print(f"[red bold]Fit config error:[/red bold] {e}")
-        sys.exit(1)
+        fit_path = resolve_fit_config(target)
+    except FileNotFoundError as e:
+        if target is None:
+            console.print(f"[red bold]Fit config error:[/red bold] {e}")
+            console.print("Tip: `wham fit <variable>` (e.g. m_vis) runs a default rate fit.")
+            sys.exit(1)
+
+    if fit_path is not None:
+        try:
+            fit_cfg, base_cfg = load_fit_config(fit_path)
+        except Exception as e:
+            console.print(f"[red bold]Fit config error:[/red bold] {e}")
+            sys.exit(1)
+        if signal or asimov:
+            console.print("[yellow]--signal/--asimov only apply to direct variable "
+                          "fits; set them in the fit YAML instead.[/yellow]")
+    else:
+        # not a fit YAML: treat the argument as a variable name
+        try:
+            base_cfg = load_config(_resolve_config(None))
+        except Exception as e:
+            console.print(f"[red bold]Config error:[/red bold] {e}")
+            sys.exit(1)
+        var = match_variable(target, base_cfg)
+        if var is None:
+            console.print(
+                f"[red bold]Unknown fit target:[/red bold] '{target}' is neither a "
+                f"fit config in Configurations/fits/ nor a variable of "
+                f"'{base_cfg.name}' ({', '.join(sorted(base_cfg.variables))})"
+            )
+            sys.exit(1)
+        try:
+            fit_cfg = synthesize_fit_config(base_cfg, var, signal=signal, asimov=asimov)
+        except ValueError as e:
+            console.print(f"[red bold]Fit config error:[/red bold] {e}")
+            sys.exit(1)
+        console.print(f"[dim]no fit YAML — default rate fit on '{var}'[/dim]")
 
     cfg, families = augmented_analysis(fit_cfg, base_cfg)
     console.print(

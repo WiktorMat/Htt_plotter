@@ -16,9 +16,16 @@ from wham.combine import (
     write_datacard,
     write_shapes,
 )
-from wham.config import discover_samples
+from wham.config import discover_samples, load_config
 from wham.fill import fill_all
-from wham.fitconfig import augmented_analysis, load_fit_config, resolve_fit_config
+from wham.fitconfig import (
+    SystematicCfg,
+    augmented_analysis,
+    load_fit_config,
+    match_variable,
+    resolve_fit_config,
+    synthesize_fit_config,
+)
 from wham.skim import ensure_skims
 
 COMBINE_IMAGE = Path(
@@ -175,6 +182,83 @@ def test_dc_name_sanitization() -> None:
     assert dc_name("DY_2Tau") == "DY_2Tau"
 
 
+def test_systematic_cfg_validation() -> None:
+    with pytest.raises(ValueError, match="needs a scaleFactor"):
+        SystematicCfg(name="x", effect="lnN", processes=["A"])
+    with pytest.raises(ValueError, match="no scaleFactor"):
+        SystematicCfg(name="x", effect="rateParam", processes=["A"], scaleFactor=1.1)
+    with pytest.raises(ValueError, match="rateParam-only"):
+        SystematicCfg(name="x", effect="lnN", processes=["A"], scaleFactor=1.1,
+                      range=(0.1, 5.0))
+    s = SystematicCfg(name="x", effect="rateParam", processes=["A"], range=(0.1, 5.0))
+    assert s.init == 1.0
+
+
+def test_datacard_rate_param(fit_setup, tmp_path: Path) -> None:
+    s = fit_setup(
+        "rate",
+        extra="  - {name: norm_tt, effect: rateParam, processes: [TT], range: [0.1, 5]}",
+    )
+    fit = s["fit"]
+    templates, signals, backgrounds = fit_templates(fit, s["cfg"], s["hists"])
+    card = tmp_path / "datacard.txt"
+    write_datacard(card, fit=fit, bin_name="SR", templates=templates,
+                   signal_names=signals, background_names=backgrounds)
+    text = card.read_text()
+
+    assert "norm_tt rateParam SR TT 1 [0.1,5]" in text
+    # rateParam systematics stay out of the lnN matrix
+    assert not any("norm_tt" in l and "rateParam" not in l for l in text.splitlines())
+
+
+def test_datacard_aliases_match_sanitized_names(fit_setup, tmp_path: Path) -> None:
+    # a pattern written against the config name (with '+') must still hit the
+    # sanitized datacard column
+    s = fit_setup("rate")
+    fit = s["fit"].model_copy(update={"systematics": [
+        SystematicCfg(name="xsec_tt", effect="lnN", processes=["T+T"], scaleFactor=1.05),
+    ]})
+    templates, signals, backgrounds = fit_templates(fit, s["cfg"], s["hists"])
+    templates["T_T"] = templates.pop("TT")
+    backgrounds[backgrounds.index("TT")] = "T_T"
+    card = tmp_path / "datacard.txt"
+    write_datacard(card, fit=fit, bin_name="SR", templates=templates,
+                   signal_names=signals, background_names=backgrounds,
+                   aliases={"T_T": "T+T"})
+    text = card.read_text()
+    row = next(l.split() for l in text.splitlines() if l.startswith("xsec_tt"))
+    procs = next(l.split()[1:] for l in text.splitlines() if l.startswith("process "))
+    assert row[2 + procs.index("T_T")] == "1.05"
+
+
+def test_synthesized_fit_defaults(workspace: dict) -> None:
+    cfg = load_config(workspace["yaml"])
+
+    fit = synthesize_fit_config(cfg, "m_vis")
+    assert fit.mode == "rate" and fit.poi() == "r"
+    assert fit.signal == "DY"  # top of the stack
+    assert not fit.asimov.enabled  # observed data by default
+    effects = {s.name: s.effect for s in fit.systematics}
+    assert effects == {"lumi": "lnN", "norm_QCD": "rateParam"}
+
+    asimov = synthesize_fit_config(cfg, "m_vis", signal="TT", asimov=True)
+    assert asimov.signal == "TT" and asimov.asimov.enabled
+    assert asimov.name.endswith("_asimov")
+
+    with pytest.raises(ValueError, match="not a variable"):
+        synthesize_fit_config(cfg, "nope")
+    with pytest.raises(ValueError, match="kind=mc"):
+        synthesize_fit_config(cfg, "m_vis", signal="data")
+
+
+def test_match_variable(workspace: dict) -> None:
+    cfg = load_config(workspace["yaml"])
+    assert match_variable("m_vis", cfg) == "m_vis"
+    assert match_variable("mvis", cfg) == "m_vis"
+    assert match_variable("MET_PHI", cfg) == "met_phi"
+    assert match_variable("nope", cfg) is None
+
+
 def test_resolve_fit_config_errors(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         resolve_fit_config(str(tmp_path / "nope.yaml"))
@@ -195,6 +279,12 @@ def test_full_rate_fit_in_container(fit_setup) -> None:
     fd = uproot.open(fitdir / f"fitDiagnostics.{fit.name}.root")
     r_fit = fd["tree_fit_sb"]["r"].array()[0]
     assert r_fit == pytest.approx(1.0, abs=0.05)  # Asimov with r=1 injected
+
+    import json
+
+    result = json.loads((fitdir / "fitresult.json").read_text())
+    assert result["r"]["value"] == pytest.approx(1.0, abs=0.05)
+    assert result["r"]["error"] > 0
 
     scan = uproot.open(fitdir / f"higgsCombine.scan_{fit.name}.MultiDimFit.mH120.root")
     assert len(scan["limit"]["r"].array()) >= fit.scan.points

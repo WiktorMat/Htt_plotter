@@ -22,9 +22,22 @@ DEFAULT_COMBINE_IMAGE = (
 
 class SystematicCfg(_Model):
     name: str
-    effect: Literal["lnN"] = "lnN"
+    effect: Literal["lnN", "rateParam"] = "lnN"
     processes: list[str]  # fnmatch patterns over datacard process names
-    scaleFactor: float = Field(gt=0)
+    scaleFactor: float | None = Field(default=None, gt=0)  # lnN only
+    init: float = 1.0  # rateParam starting value
+    range: tuple[float, float] | None = None  # rateParam bounds, e.g. [0.1, 5]
+
+    @model_validator(mode="after")
+    def _fields_match_effect(self) -> "SystematicCfg":
+        if self.effect == "lnN":
+            if self.scaleFactor is None:
+                raise ValueError(f"systematic '{self.name}': lnN needs a scaleFactor")
+            if self.range is not None or self.init != 1.0:
+                raise ValueError(f"systematic '{self.name}': init/range are rateParam-only")
+        elif self.scaleFactor is not None:
+            raise ValueError(f"systematic '{self.name}': rateParam takes no scaleFactor")
+        return self
 
 
 class ScanCfg(_Model):
@@ -152,6 +165,51 @@ def augmented_analysis(fit: FitConfig, cfg: AnalysisConfig) -> tuple[AnalysisCon
     plots = cfg.plots.model_copy(update={"datamc": datamc, "fitcp": fitcp})
     families = ["datamc"] + (["fitcp"] if fit.mode == "cp" else [])
     return cfg.model_copy(update={"plots": plots}), families
+
+
+def match_variable(name: str, cfg: AnalysisConfig) -> str | None:
+    """Exact variable name, else a unique match ignoring underscores and case
+    (so `wham fit mvis` finds m_vis)."""
+    if name in cfg.variables:
+        return name
+    norm = name.replace("_", "").casefold()
+    matches = [v for v in cfg.variables if v.replace("_", "").casefold() == norm]
+    return matches[0] if len(matches) == 1 else None
+
+
+def synthesize_fit_config(
+    cfg: AnalysisConfig, variable: str, *, signal: str | None = None, asimov: bool = False
+) -> FitConfig:
+    """Default rate fit on a plain variable, no fit YAML needed: top-of-stack
+    MC process as signal, lumi lnN on simulation, free-floating QCD norm."""
+    if variable not in cfg.variables:
+        raise ValueError(f"'{variable}' is not a variable of '{cfg.name}'")
+    mc = [n for n, p in cfg.processes.items() if p.kind == "mc"]
+    if signal is None:
+        if not mc:
+            raise ValueError("no kind=mc process to use as the fit signal")
+        signal = mc[-1]  # top of the stack
+    elif signal not in mc:
+        raise ValueError(f"signal '{signal}' must be a kind=mc process ({mc})")
+
+    systematics = [
+        SystematicCfg(name="lumi", effect="lnN", processes=mc, scaleFactor=1.025),
+    ]
+    qcd_proc = cfg.qcd_process()
+    if qcd_proc is not None:
+        systematics.append(SystematicCfg(
+            name=f"norm_{qcd_proc}", effect="rateParam",
+            processes=[qcd_proc], range=(0.1, 5.0),
+        ))
+    return FitConfig(
+        name=f"rate_{variable}" + ("_asimov" if asimov else ""),
+        analysis=cfg.name,
+        variable=variable,
+        mode="rate",
+        signal=signal,
+        asimov=AsimovCfg(enabled=asimov),
+        systematics=systematics,
+    )
 
 
 def load_fit_config(path: str | Path) -> tuple[FitConfig, AnalysisConfig]:

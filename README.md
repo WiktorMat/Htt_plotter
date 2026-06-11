@@ -26,7 +26,8 @@ The launcher sources the LCG environment itself, so from any directory:
 wham inspect          # validate config, list samples and cache status
 wham plot             # full pipeline
 wham render           # restyle from cache (~seconds)
-wham fit cp_fit       # datacard + Combine fit (see Fitting below)
+wham fit m_vis        # Combine rate fit on any variable (see Fitting below)
+wham fit cp_fit       # fully configured fit from a YAML in Configurations/fits/
 wham qcdcompare       # ABCD vs BDT-FF QCD estimate overlay (see BDT fake factors)
 wham skim             # build/refresh the skim cache
 wham clean            # prune stale skims, report cache sizes
@@ -165,7 +166,18 @@ it just costs the rebuild time.
 ## Fitting (`wham fit`)
 
 Fits run with standalone Combine in an Apptainer container, no CMSSW needed.
-Each fit is its own YAML in `Configurations/fits/` referencing an analysis config:
+
+The quickest way in is a bare variable name — `wham fit m_vis` (or `mt_tot`,
+`pt_2`, ... anything under `variables:`) runs a default rate fit on the
+observed data: POI `r` scales the top-of-stack process, lumi lnN on
+simulation, and a free-floating QCD normalization. `--signal <process>`
+overrides the signal, `--asimov` fits the Asimov dataset instead. The
+effective configuration is written to the output as `fitconfig.yaml`, ready
+to copy into `Configurations/fits/` and customize.
+
+For full control each fit is its own YAML in `Configurations/fits/`
+referencing an analysis config — `mvis_rate.yaml` / `mt_rate.yaml` are the
+configured versions of the mass fits, `cp_fit.yaml` the CP measurement:
 
 ```yaml
 # Configurations/fits/cp_fit.yaml
@@ -177,14 +189,22 @@ signal: DY_2Tau           #     yields = cos^2(a)*even + sin^2(a)*odd
 asimov: {enabled: true}   # rate: plain signal-strength fit (POI r)
 toy: {asymmetry: 0.0}     # nonzero injects a fake modulation; outputs stamped TOY
 systematics:
-  - {name: xsec_dy, effect: lnN, processes: ["DY_*"], scaleFactor: 1.02}
+  - {name: xsec_dy,  effect: lnN, processes: ["DY_*"], scaleFactor: 1.02}
+  - {name: norm_qcd, effect: rateParam, processes: [QCD], range: [0.1, 5]}
 ```
 
-`wham fit cp_fit` fills the discriminant histograms (signal region, QCD from
-ABCD, all through the same caches as plotting), exports `datacard.txt` +
-`shapes.root` (`$CHANNEL/$PROCESS`, `data_obs` conventions), runs
-`text2workspace.py`, `FitDiagnostics` (postfit shapes) and a `MultiDimFit`
-NLL scan in the container, then renders prefit/postfit stacks and the −2ΔlnL
+Systematics: `lnN` takes a `scaleFactor`; `rateParam` declares a free-floating
+normalization (optional `init`/`range`), one shared parameter across all
+matching processes. Patterns match the config process names, sanitization to
+datacard names (`W+jets` → `W_jets`) is handled internally.
+
+`wham fit cp_fit` fills the discriminant histograms (signal region, QCD
+through the method set in the analysis YAML, all via the same caches as
+plotting), exports `datacard.txt` + `shapes.root` (`$CHANNEL/$PROCESS`,
+`data_obs` conventions), runs `text2workspace.py`, `FitDiagnostics` (postfit
+shapes) and a `MultiDimFit` NLL scan in the container, then renders prefit
+and postfit stacks (same colors/labels/order as datamc), a nuisance pulls
+plot (postfit parameters also land in `fitresult.json`), and the −2ΔlnL
 scan. Outputs go to `plots/<analysis>/fit/<fitname>/`.
 
 Every stage is keyed: editing a systematic re-exports and refits in seconds
