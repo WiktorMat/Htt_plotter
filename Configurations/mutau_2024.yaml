@@ -27,13 +27,13 @@ trigger: "trg_singlemuon == 1 | trg_mt_cross == 1"
 weight: weight
 
 # Order = stack draw order (bottom to top); data is drawn as points.
-processes:
-  QCD:      {kind: qcd, color: "tab:olive"}
-  dibosons: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown"}
+processes: # TODO: split DY to genuine tau and fake tau components
+  QCD:      {kind: qcd, color: "tab:olive", label: "QCD multi-jet"}  
+  dibosons: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown", label: "Multiboson"}
   tt:       {samples: ["TTto*", "ST_tW_*"], color: "tab:purple", label: "$t\\bar{t}$"}
   W+jets:   {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "tab:red"}
   DY_2Mu:   {samples: ["DYto2Mu_*"], color: "tab:blue",
-             label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$, $\\tau_{h}\\rightarrow$ lepton fake"}
+             label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$, $\\mu\\rightarrow\\tau_{h}$"}
   DY_2Tau:  {samples: ["DYto2Tau_*"], color: "tab:orange",
              label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$"}
   data:     {kind: data, samples: ["Muon0_*", "Muon1_*"], color: "black"}
