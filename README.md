@@ -77,11 +77,18 @@ qcd:
   antiiso: "idDeepTau2018v2p5VSjet_2 > 1 & idDeepTau2018v2p5VSjet_2 < 5"
 
 variables:
-  m_vis: {bins: 40, range: [0, 200], label: "$m_{vis}$ [GeV]"}
+  m_vis:        {bins: 40, range: [0, 200], label: "$m_{vis}$ [GeV]"}
+  m_vis_coarse: {column: m_vis, bins: 10, range: [0, 200]}   # same column, second binning
+  m_vis_tails:  {column: m_vis, bins: [0, 50, 70, 90, 120, 200]}  # explicit edges
 
 plots:
-  datamc: [m_vis, pt_1]
+  datamc: [m_vis, m_vis_coarse, m_vis_tails, pt_1]
   resolution: [[pt_1, pt_2]]     # [reco, reference]
+
+style:                           # CMS label cosmetics (all optional)
+  cms_label: "Private Work"      # or Preliminary, Simulation, ...
+  era: "2024"                    # shown next to the lumi
+  com: 13.6                      # sqrt(s) in TeV
 ```
 
 Notes:
@@ -89,6 +96,10 @@ Notes:
 - Cut expressions support comparisons, `& | ~` (or `and/or/not`), arithmetic,
   `abs()`, parentheses. Anything else, including typo'd fields or undefined
   plotted variables, fails at load time with a precise error.
+- Binning: `bins` is either a count (with `range`) or a list of explicit,
+  strictly increasing edges (then omit `range`). To plot one column with
+  several binnings, define extra variables with `column:` pointing at the
+  source column — each gets its own plot and cached histogram.
 - Sample patterns are globs matched against directories in `data_dir`
   (`<data_dir>/<SAMPLE>/nominal/merged.parquet`). Ambiguous matches are errors.
 - MC scale = `lumi * xs * filter_efficiency / eff`; per-event `weight` column on top.

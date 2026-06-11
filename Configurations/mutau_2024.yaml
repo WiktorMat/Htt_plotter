@@ -6,6 +6,11 @@ name: mutau_2024
 lumi: 109080.0            # /pb
 data_dir: /eos/home-w/wmatyszk/data_mutau/Run3_2024/mt
 
+style:
+  cms_label: "Private Work"   # text after "CMS": Preliminary, Simulation, ...
+  era: "2024"                 # shown next to the lumi
+  com: 13.6                   # sqrt(s) in TeV
+
 selection: >
   pt_1 > 26 & pt_2 > 25
   & abs(eta_1) < 2.4 & abs(eta_2) < 2.5
@@ -43,6 +48,11 @@ variables:
   pt_1:    {bins: 24, range: [20, 80],  label: "$p_{T}^{\\mu}$ [GeV]"}
   pt_2:    {bins: 24, range: [20, 80],  label: "$p_{T}^{\\tau_{h}}$ [GeV]"}
   m_vis:   {bins: 40, range: [0, 200],  label: "$m_{vis}$ [GeV]"}
+  # same column, different binnings: 'column' points at the source branch
+  m_vis_coarse: {column: m_vis, bins: 10, range: [0, 200], label: "$m_{vis}$ [GeV]"}
+  # explicit (variable-width) bin edges: give 'bins' a list, omit 'range'
+  m_vis_varbins: {column: m_vis, bins: [0, 40, 55, 65, 75, 85, 95, 110, 130, 160, 200],
+                  label: "$m_{vis}$ [GeV]"}
   mt_tot:  {bins: 40, range: [0, 200],  label: "$m_{T}^{tot}$ [GeV]"}
   mt_1:    {bins: 40, range: [0, 200],  label: "$m_{T}(\\mu)$ [GeV]"}
   mt_2:    {bins: 40, range: [0, 200],  label: "$m_{T}(\\tau_{h})$ [GeV]"}
@@ -55,7 +65,8 @@ plots:
   resolution:
     - [pt_1, pt_2]
     - [mt_tot, m_vis]
-  datamc:     [pt_1, pt_2, m_vis, mt_tot, mt_1, mt_2, met_pt, met_phi, dR]
+  datamc:     [pt_1, pt_2, m_vis, m_vis_coarse, m_vis_varbins,
+               mt_tot, mt_1, mt_2, met_pt, met_phi, dR]
   cp:
     - {var: aco_mu_rho, even: wt_cp_sm, odd: wt_cp_ps}
   display3d:  {sample: "TTto2L2Nu", n_events: 3}

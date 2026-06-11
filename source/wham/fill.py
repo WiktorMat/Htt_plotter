@@ -57,14 +57,19 @@ class FillSpec:
     cp: tuple[tuple[str, str, str, dict], ...]       # (var, even_col, odd_col, varcfg)
     # like cp but with signal-region cuts (trigger & os & iso), for fitting
     fitcp: tuple[tuple[str, str, str, dict], ...] = ()
+    # variables whose source column differs from their name (alias -> column)
+    var_columns: tuple[tuple[str, str], ...] = ()
 
 
 def _axis(var: str, vcfg: dict):
     import hist
 
-    return hist.axis.Regular(
-        int(vcfg["bins"]), float(vcfg["range"][0]), float(vcfg["range"][1]), name=var
-    )
+    bins = vcfg["bins"]
+    if isinstance(bins, int):
+        return hist.axis.Regular(
+            bins, float(vcfg["range"][0]), float(vcfg["range"][1]), name=var
+        )
+    return hist.axis.Variable([float(e) for e in bins], name=var)
 
 
 def make_hist(spec: FillSpec, family: str, var: str, vcfg: dict):
@@ -93,7 +98,8 @@ def resolution_binning(cfg: AnalysisConfig, reco: str, ref: str) -> dict:
         return {"bins": 40, "range": (-np.pi, np.pi), "kind": "angle", "label": None,
                 "relative": False}
     if not ref_cfg.relative:
-        span = ref_cfg.range[1] - ref_cfg.range[0]
+        lo, hi = ref_cfg.span()
+        span = hi - lo
         return {"bins": 40, "range": (-span / 2, span / 2), "kind": "scalar",
                 "label": None, "relative": False}
     return {"bins": 40, "range": (-2.0, 2.0), "kind": "scalar", "label": None,
@@ -145,6 +151,9 @@ def build_fill_spec(
         datamc=datamc,
         cp=cp,
         fitcp=fitcp,
+        var_columns=tuple(
+            (v, vcfg.column) for v, vcfg in cfg.variables.items() if vcfg.column
+        ),
     )
 
 
@@ -162,12 +171,18 @@ def hist_keys(spec: FillSpec) -> list[tuple[str, str, dict]]:
 
 
 def spec_extras(spec: FillSpec) -> dict[HistKey, dict]:
-    """Per-hist extra cache-key payload (CP weight columns)."""
+    """Per-hist extra cache-key payload (CP weight columns, column aliases)."""
     extras: dict[HistKey, dict] = {}
     for var, even_col, odd_col, _ in spec.cp:
         extras[("cp", var)] = {"even": even_col, "odd": odd_col}
     for var, even_col, odd_col, _ in spec.fitcp:
         extras[("fitcp", var)] = {"even": even_col, "odd": odd_col}
+    colmap = dict(spec.var_columns)
+    for reco, ref, _, _ in spec.resolution:
+        rc, fc = colmap.get(reco, reco), colmap.get(ref, ref)
+        if (rc, fc) != (reco, ref):
+            key = ("resolution", resolution_name(reco, ref))
+            extras[key] = {**extras.get(key, {}), "columns": [rc, fc]}
     return extras
 
 
@@ -223,6 +238,10 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
         weights = np.full(n, scale)
 
     hists: dict[HistKey, Any] = {}
+    colmap = dict(spec.var_columns)
+
+    def column(var: str) -> str:
+        return colmap.get(var, var)
 
     def fill(family: str, name: str, vcfg: dict, region: str,
              values: np.ndarray, mask: np.ndarray, w: np.ndarray) -> None:
@@ -240,12 +259,13 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
 
     # ---- resolution: derived variable
     for reco, ref, rescfg, refcfg in spec.resolution:
-        if reco not in cols or ref not in cols:
+        reco_col, ref_col = column(reco), column(ref)
+        if reco_col not in cols or ref_col not in cols:
             continue
-        rv, cv = cols.get(reco), cols.get(ref)
+        rv, cv = cols.get(reco_col), cols.get(ref_col)
         is_angle = refcfg.get("kind") == "angle"
         relative = bool(rescfg.get("relative", True)) and not is_angle
-        mask = cols.finite(reco) & cols.finite(ref)
+        mask = cols.finite(reco_col) & cols.finite(ref_col)
         if relative:
             mask = mask & (cv != 0)
             with np.errstate(divide="ignore", invalid="ignore"):
@@ -312,20 +332,22 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
             region_masks = {"OS": base & os_mask, "SS": base & ~os_mask}
 
         for var, vcfg in spec.datamc:
-            if var not in cols:
+            col = column(var)
+            if col not in cols:
                 continue
-            values = cols.get(var)
-            finite = cols.finite(var)
+            values = cols.get(col)
+            finite = cols.finite(col)
             for region, rmask in region_masks.items():
                 fill("datamc", var, vcfg, region, values, rmask & finite, weights)
 
     # ---- cp: even/odd CP weights (MC only)
     if sample.kind != "data":
         for var, even_col, odd_col, vcfg in spec.cp:
-            if var not in cols or even_col not in cols or odd_col not in cols:
+            col = column(var)
+            if col not in cols or even_col not in cols or odd_col not in cols:
                 continue
-            values = cols.get(var)
-            finite = cols.finite(var)
+            values = cols.get(col)
+            finite = cols.finite(col)
             fill("cp", var, vcfg, "even", values, finite, weights * cols.get(even_col))
             fill("cp", var, vcfg, "odd", values, finite, weights * cols.get(odd_col))
 
@@ -334,10 +356,11 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
         sr = sr_mask()
         if sr is not None:
             for var, even_col, odd_col, vcfg in spec.fitcp:
-                if var not in cols or even_col not in cols or odd_col not in cols:
+                col = column(var)
+                if col not in cols or even_col not in cols or odd_col not in cols:
                     continue
-                values = cols.get(var)
-                mask = sr & cols.finite(var)
+                values = cols.get(col)
+                mask = sr & cols.finite(col)
                 fill("fitcp", var, vcfg, "even", values, mask, weights * cols.get(even_col))
                 fill("fitcp", var, vcfg, "odd", values, mask, weights * cols.get(odd_col))
 

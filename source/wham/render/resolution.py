@@ -52,5 +52,5 @@ def render_resolution(
         ax.set_ylabel("Events")
         ax.legend(fontsize=13)
         ax.set_ylim(bottom=0)
-        cms_label(ax, cfg.lumi)
+        cms_label(ax, cfg)
         save(fig, outdir / "resolution", name, console)

@@ -48,5 +48,5 @@ def render_cp(
         ax.set_ylabel("Weighted events")
         ax.set_ylim(bottom=0)
         ax.legend(fontsize=13)
-        cms_label(ax, cfg.lumi)
+        cms_label(ax, cfg)
         save(fig, outdir / "cp", var, console)

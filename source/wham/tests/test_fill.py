@@ -158,6 +158,43 @@ def test_fitcp_cache_key_includes_weight_columns(workspace: dict) -> None:
     assert k3 == k4
 
 
+def test_column_alias_and_explicit_edges(workspace: dict) -> None:
+    from wham.config import VariableCfg
+    from wham.histcache import cache_key
+
+    cfg = load_config(workspace["yaml"])
+    variables = dict(cfg.variables)
+    variables["m_vis_coarse"] = VariableCfg(column="m_vis", bins=[0.0, 50.0, 100.0, 250.0])
+    plots = cfg.plots.model_copy(update={"datamc": [*cfg.plots.datamc, "m_vis_coarse"]})
+    cfg = cfg.model_copy(update={"variables": variables, "plots": plots})
+
+    samples, _ = discover_samples(cfg)
+    skims = ensure_skims(cfg, samples, workers=1)
+    spec = build_fill_spec(cfg, families=["datamc"])
+    hists: dict = {}
+    for s in samples:
+        merge_hists(hists, fill_sample(s, skims[s.name], spec))
+
+    coarse = hists[("datamc", "m_vis_coarse")]
+    assert list(coarse.axes[-1].edges) == [0.0, 50.0, 100.0, 250.0]
+
+    # contents must be a rebin of the uniform m_vis hist (25 bins over [0, 250])
+    base = hists[("datamc", "m_vis")]
+    sl = {"process": "data", "region": "OS_iso", "variation": "nominal"}
+    base_vals = base[sl].view()["value"]
+    coarse_vals = coarse[sl].view()["value"]
+    assert coarse_vals[0] == pytest.approx(base_vals[:5].sum())    # [0, 50)
+    assert coarse_vals[1] == pytest.approx(base_vals[5:10].sum())  # [50, 100)
+    assert coarse_vals[2] == pytest.approx(base_vals[10:].sum())   # [100, 250)
+
+    # the alias's source column is part of the cache key
+    vcfg = variables["m_vis_coarse"].model_dump()
+    k1 = cache_key(cfg, samples, skims, spec, "datamc", "m_vis_coarse", vcfg)
+    k2 = cache_key(cfg, samples, skims, spec, "datamc", "m_vis_coarse",
+                   dict(vcfg, column="pt_1"))
+    assert k1 != k2
+
+
 def test_fill_all_uses_cache(workspace: dict) -> None:
     cfg = load_config(workspace["yaml"])
     samples, _ = discover_samples(cfg)

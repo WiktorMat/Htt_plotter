@@ -73,6 +73,42 @@ def test_unmatched_pattern_warns(workspace: dict) -> None:
     assert any("Zprime_*" in w for w in warnings)
 
 
+def test_variable_binning_validation() -> None:
+    from wham.config import VariableCfg
+
+    VariableCfg(bins=10, range=(0, 1))            # count + range
+    v = VariableCfg(bins=[0, 1, 5, 20])           # explicit edges
+    assert v.span() == (0, 20)
+    with pytest.raises(ValueError, match="needs an explicit 'range'"):
+        VariableCfg(bins=10)
+    with pytest.raises(ValueError, match="must be omitted"):
+        VariableCfg(bins=[0, 1], range=(0, 1))
+    with pytest.raises(ValueError, match="strictly increasing"):
+        VariableCfg(bins=[0, 5, 5, 10])
+    with pytest.raises(ValueError, match="at least 2"):
+        VariableCfg(bins=[3])
+    with pytest.raises(ValueError, match="increasing"):
+        VariableCfg(bins=5, range=(1, 0))
+    with pytest.raises(ValueError, match="plain column name"):
+        VariableCfg(bins=5, range=(0, 1), column="pt_1 + pt_2")
+
+
+def test_column_alias_resolution(workspace: dict) -> None:
+    from wham.config import VariableCfg
+
+    cfg = load_config(workspace["yaml"])
+    variables = dict(cfg.variables)
+    variables["m_vis_coarse"] = VariableCfg(column="m_vis", bins=[0.0, 50.0, 250.0])
+    plots = cfg.plots.model_copy(update={"datamc": ["m_vis_coarse"]})
+    cfg = cfg.model_copy(update={"variables": variables, "plots": plots})
+
+    assert cfg.column_of("m_vis_coarse") == "m_vis"
+    assert cfg.column_of("pt_1") == "pt_1"
+    cols = cfg.required_columns()
+    assert "m_vis" in cols
+    assert "m_vis_coarse" not in cols  # aliases are not real file columns
+
+
 def test_params_side_file(workspace: dict) -> None:
     base = workspace["yaml"].read_text()
     lines = base.splitlines()

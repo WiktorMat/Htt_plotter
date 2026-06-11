@@ -53,6 +53,9 @@ def cache_key(
         "family": family,
         "binning": {k: vcfg.get(k) for k in ("bins", "range", "kind", "relative")},
     }
+    if vcfg.get("column"):
+        # conditional so keys of plain (non-aliased) variables stay stable
+        payload["binning"]["column"] = vcfg["column"]
     if extra:
         # e.g. CP weight columns; added conditionally so keys of histograms
         # without extras (the vast majority) stay stable.

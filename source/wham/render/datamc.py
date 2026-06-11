@@ -72,7 +72,7 @@ def render_datamc(
         ax.legend([by_label[n] for n in order if n in by_label],
                   [n for n in order if n in by_label], fontsize=17)
         ax.tick_params(labelbottom=False)
-        cms_label(ax, cfg.lumi)
+        cms_label(ax, cfg)
 
         # ---- ratio panel
         safe_mc = np.where(mc > 0, mc, np.nan)

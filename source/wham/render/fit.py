@@ -94,7 +94,7 @@ def _render_shape_dir(fit: FitConfig, cfg: AnalysisConfig, shapes, title: str,
     ax.tick_params(labelbottom=False)
     ax.text(0.03, 0.97, title, transform=ax.transAxes, ha="left", va="top",
             fontsize=14, fontweight="bold")
-    cms_label(ax, cfg.lumi)
+    cms_label(ax, cfg)
     _stamp(ax, fit)
 
     safe = np.where(total_vals > 0, total_vals, np.nan)
@@ -155,6 +155,6 @@ def render_fit(fit: FitConfig, cfg: AnalysisConfig, fitdir: Path, console=None) 
         ax.set_ylim(bottom=0)
         ax.text(0.03, 0.97, f"best fit {fit.poi()} = {best:.3f}",
                 transform=ax.transAxes, ha="left", va="top", fontsize=14)
-        cms_label(ax, cfg.lumi)
+        cms_label(ax, cfg)
         _stamp(ax, fit)
         save(fig, fitdir, "nll_scan", console)

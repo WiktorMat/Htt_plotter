@@ -25,8 +25,11 @@ def set_style() -> None:
         _style_set = True
 
 
-def cms_label(ax, lumi: float) -> None:
-    hep.cms.label("Private Work", data=True, lumi=round(lumi / 1000.0, 1), com=13.6, ax=ax)
+def cms_label(ax, cfg: AnalysisConfig) -> None:
+    rlabel = f"{round(cfg.lumi / 1000.0, 1)} fb$^{{-1}}$ ({cfg.style.com:g} TeV)"
+    if cfg.style.era:
+        rlabel = f"{cfg.style.era}, {rlabel}"
+    hep.cms.label(cfg.style.cms_label, data=True, rlabel=rlabel, ax=ax)
 
 
 def save(fig, outdir: Path, name: str, console=None) -> None:

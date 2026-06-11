@@ -29,18 +29,41 @@ class _Model(BaseModel):
 
 
 class VariableCfg(_Model):
-    bins: int = Field(gt=0)
-    range: tuple[float, float]
+    bins: int | tuple[float, ...]  # bin count (needs range) or explicit ascending edges
+    range: tuple[float, float] | None = None
+    column: str | None = None  # source column; defaults to the variable name
     label: str | None = None
     kind: Literal["scalar", "angle"] = "scalar"
     relative: bool = True  # resolution: (reco-ref)/ref vs reco-ref
 
-    @field_validator("range")
+    @model_validator(mode="after")
+    def _binning_valid(self) -> "VariableCfg":
+        if isinstance(self.bins, int):
+            if self.bins <= 0:
+                raise ValueError(f"bins must be positive, got {self.bins}")
+            if self.range is None:
+                raise ValueError("an integer 'bins' needs an explicit 'range'")
+            if not self.range[0] < self.range[1]:
+                raise ValueError(f"range must be increasing, got {self.range}")
+        else:
+            if len(self.bins) < 2:
+                raise ValueError("explicit bin edges need at least 2 values")
+            if not all(a < b for a, b in zip(self.bins, self.bins[1:])):
+                raise ValueError(f"bin edges must be strictly increasing, got {self.bins}")
+            if self.range is not None:
+                raise ValueError("'range' must be omitted when 'bins' lists explicit edges")
+        return self
+
+    @field_validator("column")
     @classmethod
-    def _ordered(cls, v: tuple[float, float]) -> tuple[float, float]:
-        if not v[0] < v[1]:
-            raise ValueError(f"range must be increasing, got {v}")
+    def _column_is_identifier(cls, v: str | None) -> str | None:
+        if v is not None and not v.isidentifier():
+            raise ValueError(f"column must be a plain column name, got {v!r}")
         return v
+
+    def span(self) -> tuple[float, float]:
+        """(low, high) of the binned region, whichever way bins were given."""
+        return self.range if self.range is not None else (self.bins[0], self.bins[-1])
 
 
 class ProcessCfg(_Model):
@@ -89,6 +112,12 @@ class Display3DCfg(_Model):
     n_events: int = Field(default=1, gt=0)
 
 
+class StyleCfg(_Model):
+    cms_label: str = "Private Work"  # text after "CMS": Preliminary, Simulation, ...
+    era: str | None = None           # e.g. "2024" or "Run 3"; shown next to the lumi
+    com: float = 13.6                # sqrt(s) in TeV
+
+
 class PlotsCfg(_Model):
     resolution: list[tuple[str, str]] = []  # [reco, reference] pairs
     datamc: list[str] = []
@@ -112,6 +141,7 @@ class AnalysisConfig(_Model):
     sample_params: dict[str, SampleParams] = {}
     variables: dict[str, VariableCfg]
     plots: PlotsCfg = PlotsCfg()
+    style: StyleCfg = StyleCfg()
 
     # ---- validators -------------------------------------------------
 
@@ -196,6 +226,11 @@ class AnalysisConfig(_Model):
                 return n
         return None
 
+    def column_of(self, var: str) -> str:
+        """Source column for a variable (aliases resolve via 'column')."""
+        vcfg = self.variables.get(var)
+        return vcfg.column if (vcfg is not None and vcfg.column) else var
+
     def required_columns(self) -> frozenset[str]:
         """Union of every column any configured fill could touch."""
         cols: set[str] = {"weight", "os"}
@@ -204,10 +239,10 @@ class AnalysisConfig(_Model):
             if src:
                 cols |= parse(src).columns
         for reco, ref in self.plots.resolution:
-            cols.update((reco, ref))
-        cols.update(self.plots.datamc)
+            cols.update((self.column_of(reco), self.column_of(ref)))
+        cols.update(self.column_of(v) for v in self.plots.datamc)
         for c in (*self.plots.cp, *self.plots.fitcp):
-            cols.update((c.var, c.even, c.odd))
+            cols.update((self.column_of(c.var), c.even, c.odd))
         if self.plots.display3d is not None:
             cols |= DISPLAY3D_COLUMNS
         return frozenset(cols)
