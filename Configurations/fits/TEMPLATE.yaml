@@ -70,8 +70,9 @@ systematics:
 
 # ---------------------------------------------------------------------------
 # Likelihood scans (MultiDimFit). One POI -> 1D profiled scan; two POIs ->
-# 2D grid rendered as 68/95% CL contours. `points` is per axis; `range`
-# overrides the POI range for 1D scans only.
+# 2D grid rendered as a -2dlnL heatmap with 68/95% CL contours. `points` is
+# per axis. Scan windows default to best fit +- 10 sigma (clipped to the POI
+# range); override with `range` (1D) or `ranges` (2D, one [lo, hi] per POI).
 # If `scans:` is omitted entirely, every POI gets a default 1D scan.
 # ---------------------------------------------------------------------------
 scans:

@@ -15,6 +15,7 @@ from wham.combine import (
     inject_toy_asymmetry,
     model_source,
     run_fit,
+    scan_command,
     scan_file,
     write_datacard,
     write_shapes,
@@ -179,6 +180,8 @@ def _fit_dict(**over) -> dict:
     ({"scans": [{"pois": ["r", "r"], "points": 10}]}, "duplicate POI"),
     ({"scans": [{"pois": ["r", "r2"], "points": 10, "range": [0, 1]}]},
      "1D scans only"),
+    ({"scans": [{"pois": ["r"], "points": 10, "ranges": [[0, 1], [0, 1]]}]},
+     "2D scans only"),
     ({"categories": [{"name": "SR", "variable": "x"},
                      {"name": "SR", "variable": "y"}]}, "duplicate category"),
     ({"categories": [{"name": "no spaces", "variable": "x"}]}, "datacard-safe"),
@@ -217,6 +220,27 @@ def test_resolve_fit_config_errors(tmp_path: Path) -> None:
 
 
 # ------------------------------------------------------------- model source
+
+
+def test_scan_auto_window(fit_setup) -> None:
+    fit = fit_setup("scale")["fit"]
+    scan = fit.scans[0]  # 1D over r, no explicit range
+
+    # no fit result yet -> full POI range
+    cmd = scan_command(fit, scan, None)
+    assert "--setParameterRanges r=0,3" in cmd
+
+    # with a fit result -> best fit +- 10 sigma, clipped to the POI range
+    fitresult = {"params": {"r": {"value": 1.0, "error": 0.02}}}
+    cmd = scan_command(fit, scan, fitresult)
+    assert "--setParameterRanges r=0.8,1.2" in cmd
+
+    wide = {"params": {"r": {"value": 0.1, "error": 0.5}}}
+    assert "--setParameterRanges r=0,3" in scan_command(fit, scan, wide)
+
+    # explicit range always wins
+    fixed = scan.model_copy(update={"range": (0.5, 1.5)})
+    assert "--setParameterRanges r=0.5,1.5" in scan_command(fit, fixed, fitresult)
 
 
 def test_model_source_scale(fit_setup) -> None:

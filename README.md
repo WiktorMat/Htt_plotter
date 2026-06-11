@@ -186,8 +186,10 @@ A fit config declares:
   optional `categories:` restricts one to specific bins. Patterns match the
   config process names (`W+jets` etc.); sanitization and component templates
   are resolved internally.
-- **scans** — 1D entries give profiled −2ΔlnL curves, two-POI entries give
-  68/95% CL contour plots. Omitted entirely → one 1D scan per POI.
+- **scans** — 1D entries give profiled −2ΔlnL curves, two-POI entries a
+  −2ΔlnL heatmap with 68/95% CL contours. Windows auto-center on the best
+  fit (± 10σ) unless `range`/`ranges` is given; omitted entirely → one 1D
+  scan per POI.
 - **asimov / toy** — observed data vs Asimov (`combine -t -1`, truth =
   POI inits overridden by `asimov.parameters`); `toy.asymmetry` modulates
   2-component processes by (1 ± A·cos x) for machinery validation (outputs

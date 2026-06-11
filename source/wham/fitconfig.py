@@ -170,12 +170,20 @@ class CategoryCfg(_Model):
 class ScanCfg(_Model):
     pois: list[str] = Field(min_length=1, max_length=2)  # 1 -> 1D, 2 -> 2D grid
     points: int = Field(default=50, gt=1)  # per axis
-    range: tuple[float, float] | None = None  # 1D only; default = POI range
+    # explicit windows; without them the scan auto-windows around the best
+    # fit (+- 10 sigma from FitDiagnostics, clipped to the POI range)
+    range: tuple[float, float] | None = None  # 1D only
+    ranges: list[tuple[float, float]] | None = None  # 2D only, one per POI
 
     @model_validator(mode="after")
-    def _range_1d_only(self) -> "ScanCfg":
+    def _ranges_match_dim(self) -> "ScanCfg":
         if self.range is not None and len(self.pois) != 1:
-            raise ValueError("scan 'range' applies to 1D scans only (2D uses POI ranges)")
+            raise ValueError("scan 'range' applies to 1D scans only (2D: 'ranges')")
+        if self.ranges is not None:
+            if len(self.pois) != 2:
+                raise ValueError("scan 'ranges' applies to 2D scans only (1D: 'range')")
+            if len(self.ranges) != 2:
+                raise ValueError("scan 'ranges' needs exactly two [lo, hi] pairs")
         if len(set(self.pois)) != len(self.pois):
             raise ValueError(f"duplicate POI in scan {self.pois}")
         return self

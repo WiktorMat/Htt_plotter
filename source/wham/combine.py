@@ -375,11 +375,31 @@ def scan_tag(scan: ScanCfg) -> str:
     return "_".join(scan.pois)
 
 
-def scan_command(fit: FitConfig, scan: ScanCfg) -> str:
-    ranges = []
-    for poi in scan.pois:
-        lo, hi = scan.range if scan.range is not None else fit.model.pois[poi].range
-        ranges.append(f"{poi}={lo:g},{hi:g}")
+def scan_window(
+    fit: FitConfig, scan: ScanCfg, poi: str, index: int,
+    fitresult: dict | None,
+) -> tuple[float, float]:
+    """Scan window for one POI: the explicit range/ranges entry if given,
+    else best fit +- 10 sigma (clipped to the POI range) so the grid
+    resolves the minimum, else the full POI range."""
+    if len(scan.pois) == 1 and scan.range is not None:
+        return scan.range
+    if len(scan.pois) == 2 and scan.ranges is not None:
+        return tuple(scan.ranges[index])
+    lo, hi = fit.model.pois[poi].range
+    params = (fitresult or {}).get("params", {})
+    if poi in params and params[poi].get("error", 0) > 0:
+        best, sigma = params[poi]["value"], params[poi]["error"]
+        return max(lo, best - 10 * sigma), min(hi, best + 10 * sigma)
+    return lo, hi
+
+
+def scan_command(fit: FitConfig, scan: ScanCfg, fitresult: dict | None = None) -> str:
+    ranges = [
+        f"{poi}={lo:g},{hi:g}"
+        for i, poi in enumerate(scan.pois)
+        for lo, hi in [scan_window(fit, scan, poi, i, fitresult)]
+    ]
     points = scan.points if len(scan.pois) == 1 else scan.points**2
     return (
         f"combine -M MultiDimFit {WORKSPACE_FILE} -n .scan_{fit.name}_{scan_tag(scan)} "
@@ -464,14 +484,23 @@ def run_fit(
         manifest_path.write_text(json.dumps({"export_key": key, "time": time.time()}))
         return fitdir
 
+    def _fitresult() -> dict | None:
+        # available to the scan stages: the dump stage runs (and is copied
+        # back) before them, supplying best fit + sigma for auto-windowing
+        try:
+            return json.loads((fitdir / FITRESULT_FILE).read_text())
+        except (OSError, json.JSONDecodeError):
+            return None
+
     stages = [
         ("text2workspace", do_t2w, t2w_command(fit), [WORKSPACE_FILE]),
         ("FitDiagnostics", do_fitdiag, fitdiag_command(fit), [fitdiag_file(fit)]),
         ("fit result dump", do_dump, f"python3 {DUMP_SCRIPT_FILE}", [FITRESULT_FILE]),
         *(
             (f"MultiDimFit scan ({scan_tag(scan)})",
-             do_t2w or missing(scan_file(fit, scan)),
-             scan_command(fit, scan), [scan_file(fit, scan)])
+             do_t2w or do_dump or missing(scan_file(fit, scan)),
+             lambda scan=scan: scan_command(fit, scan, _fitresult()),
+             [scan_file(fit, scan)])
             for scan in scans
         ),
     ]
@@ -497,6 +526,8 @@ def run_fit(
                     if console is not None:
                         console.print(f"  {label}: up to date")
                     continue
+                if callable(command):  # scan windows depend on the dump stage
+                    command = command()
                 t0 = time.perf_counter()
                 log_lines.append(f"$ {command}")
                 log_lines.append(run_container(fit.combine.image, scratch, command))

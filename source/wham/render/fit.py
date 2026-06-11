@@ -301,32 +301,49 @@ def _render_scan_2d(fit: FitConfig, cfg: AnalysisConfig, fitdir: Path,
         return
     x, y, dnll = arrays[p1], arrays[p2], arrays["deltaNLL"]
 
-    grid = dnll > 0
-    finite = grid & np.isfinite(dnll)
-    if finite.sum() < 4:
+    grid = (dnll > 0) & np.isfinite(dnll)  # first entry is the best fit (== 0)
+    if grid.sum() < 4:
         if console is not None:
             console.print(f"  [yellow]2D scan {scan_tag(scan)}: too few points — skipped[/yellow]")
         return
 
-    fig, ax = plt.subplots(figsize=(10, 9))
+    # combine's --algo grid points form a regular lattice; rebuild it
+    # (cells without a converged point stay NaN and render blank)
+    xs, ys = np.unique(x[grid]), np.unique(y[grid])
+    z = np.full((len(ys), len(xs)), np.nan)
+    ix = np.searchsorted(xs, x[grid])
+    iy = np.searchsorted(ys, y[grid])
+    z[iy, ix] = 2 * dnll[grid]
+
+    fig, ax = plt.subplots(figsize=(11, 9))
+    # saturate the far field so the color scale resolves the minimum region
+    vmax = float(min(25.0, np.nanmax(z)))
+    mesh = ax.pcolormesh(xs, ys, z, shading="nearest", cmap="viridis",
+                         vmin=0.0, vmax=vmax, rasterized=True)
+    cbar = fig.colorbar(mesh, ax=ax, pad=0.015)
+    cbar.set_label(r"$-2\,\Delta\,\mathrm{ln}\,L$", fontsize=17)
+    cbar.ax.tick_params(labelsize=13)
+
     # 68% / 95% CL for 2 parameters: 2*deltaNLL = 2.30 / 5.99
-    ax.tricontour(x[finite], y[finite], 2 * dnll[finite],
-                  levels=[2.30, 5.99], colors=["tab:blue", "tab:red"],
-                  linewidths=2)
-    handles = [
-        mlines.Line2D([], [], color="tab:blue", linewidth=2, label="68% CL"),
-        mlines.Line2D([], [], color="tab:red", linewidth=2, label="95% CL"),
-    ]
+    cs = ax.contour(xs, ys, z, levels=[2.30, 5.99], colors="white",
+                    linewidths=2, linestyles=["solid", "dashed"])
+    ax.clabel(cs, fmt={2.30: "68%", 5.99: "95%"}, fontsize=13, colors="white")
+
+    handles = []
     if np.any(~grid):
         bx, by = float(x[~grid][0]), float(y[~grid][0])
-        ax.plot(bx, by, "*", color="black", markersize=16, zorder=5)
-        handles.append(mlines.Line2D([], [], color="black", marker="*", linestyle="",
-                                     markersize=12, label="Best fit"))
+        ax.plot(bx, by, "*", color="white", markeredgecolor="black",
+                markersize=18, zorder=5)
+        handles.append(mlines.Line2D([], [], color="white", marker="*",
+                                     markeredgecolor="black", linestyle="",
+                                     markersize=14, label="Best fit"))
+    if handles:
+        ax.legend(handles=handles, fontsize=14, loc="upper left",
+                  framealpha=0.85)
 
     ax.set_xlabel(poi_label(p1))
     ax.set_ylabel(poi_label(p2))
-    ax.legend(handles=handles, fontsize=14, loc="upper left")
-    cms_label(ax, cfg)
+    cms_label_split(ax, cbar.ax, cfg)
     _stamp(ax, fit)
     save(fig, fitdir, f"nll_scan_{scan_tag(scan)}", console)
 
