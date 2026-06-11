@@ -81,6 +81,12 @@ def total_mc(h: Any, cfg: AnalysisConfig, region: str) -> tuple[np.ndarray, np.n
     return counts, sumw2
 
 
+def step_with_band(ax, edges: np.ndarray, counts: np.ndarray, unc: np.ndarray,
+                   color: str, label: str) -> None:
+    ax.stairs(counts, edges, color=color, linewidth=2, label=label)
+    draw_unc_band(ax, edges, np.maximum(counts - unc, 0.0), counts + unc)
+
+
 def draw_unc_band(ax, edges: np.ndarray, low: np.ndarray, high: np.ndarray, label=None) -> None:
     ax.fill_between(
         edges,

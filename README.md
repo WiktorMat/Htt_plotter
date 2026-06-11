@@ -27,6 +27,7 @@ wham inspect          # validate config, list samples and cache status
 wham plot             # full pipeline
 wham render           # restyle from cache (~seconds)
 wham fit cp_fit       # datacard + Combine fit (see Fitting below)
+wham qcdcompare       # ABCD vs BDT-FF QCD estimate overlay (see BDT fake factors)
 wham skim             # build/refresh the skim cache
 wham clean            # prune stale skims, report cache sizes
 ```
@@ -137,6 +138,10 @@ under `plots.ffcheck:`. Each ffcheck plot overlays the anti-iso `data − MC`
 shape raw and FF-weighted (the latter is exactly the QCD estimate), with a
 weighted/raw ratio panel — the effective per-bin fake factor. For the score
 variable itself that ratio must track the bin centers, a built-in closure check.
+
+`wham qcdcompare` overlays the ABCD and BDT-FF QCD estimates in the signal
+region (same datamc fills, two qcd.method variants, both cached) with an
+FF/ABCD ratio panel, one plot per datamc variable in `plots/<name>/qcdcompare/`.
 
 Two model layouts are recognized: `<models>/<channel>_<process>/best_model.json`
 (our muffin_trainings) and `<models>/model_<channel>_<process>/model.json`

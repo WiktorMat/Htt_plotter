@@ -314,6 +314,49 @@ def plot(config_path: str, only: tuple[str, ...], only_vars: tuple[str, ...],
     )
 
 
+# ---------------------------------------------------------------- qcdcompare
+
+
+@main.command()
+@click.argument("config_path", required=False)
+@click.option("--var", "only_vars", multiple=True, help="Limit to variables (repeatable).")
+@click.option("--workers", default=6, show_default=True)
+def qcdcompare(config_path: str, only_vars: tuple[str, ...], workers: int) -> None:
+    """Compare the ABCD and BDT-FF QCD estimates in the signal region."""
+    from wham.fill import fill_all
+    from wham.render.common import set_style
+    from wham.render.qcdcompare import render_qcdcompare
+    from wham.skim import ensure_skims
+
+    cfg, samples = _load(config_path)
+    if not (cfg.qcd.iso and cfg.qcd.antiiso and cfg.qcd.ff_weight):
+        console.print(
+            "[red bold]qcdcompare needs qcd.iso, qcd.antiiso and qcd.ff_weight[/red bold] "
+            "so both the ABCD and FF estimates are defined."
+        )
+        sys.exit(1)
+
+    def variant(method: str) -> AnalysisConfig:
+        return cfg.model_copy(update={"qcd": cfg.qcd.model_copy(update={"method": method})})
+
+    t0 = time.perf_counter()
+    skims = ensure_skims(cfg, samples, workers=workers,
+                         on_progress=_skim_progress(len(samples)))
+    # ff variant last so the datamc sidecar parquet matches the YAML's method
+    hists_abcd = fill_all(variant("abcd"), samples, skims, families=["datamc"],
+                          only_vars=only_vars or None, workers=workers, console=console)
+    hists_ff = fill_all(variant("ff"), samples, skims, families=["datamc"],
+                        only_vars=only_vars or None, workers=workers, console=console)
+    console.print(f"Histograms ready in {time.perf_counter() - t0:.1f}s")
+
+    set_style()
+    outdir = cfg.resolved_output_dir()
+    render_qcdcompare(cfg, hists_abcd, hists_ff, outdir, only_vars or None, console)
+    console.print(
+        f"[bold green]Done[/bold green] in {time.perf_counter() - t0:.1f}s -> {outdir}/qcdcompare/"
+    )
+
+
 # ---------------------------------------------------------------- render
 
 

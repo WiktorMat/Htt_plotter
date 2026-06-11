@@ -15,14 +15,9 @@ import numpy as np
 
 from wham.config import AnalysisConfig
 from wham.qcd import region_sums
-from wham.render.common import cms_label, draw_unc_band, save, var_label
+from wham.render.common import cms_label, save, step_with_band, var_label
 
 RAW, FF = "OS_antiiso_raw", "OS_antiiso_ff"
-
-
-def _step(ax, edges, counts, unc, color, label):
-    ax.stairs(counts, edges, color=color, linewidth=2, label=label)
-    draw_unc_band(ax, edges, np.maximum(counts - unc, 0.0), counts + unc)
 
 
 def render_ffcheck(
@@ -55,10 +50,10 @@ def render_ffcheck(
         ax = fig.add_subplot(gs[0])
         rax = fig.add_subplot(gs[1], sharex=ax)
 
-        _step(ax, edges, *curves[RAW], "black",
-              "Anti-iso data $-$ MC (raw)")
-        _step(ax, edges, *curves[FF], qcd_color,
-              "Anti-iso data $-$ MC $\\times$ FF (QCD est.)")
+        step_with_band(ax, edges, *curves[RAW], "black",
+                       "Anti-iso data $-$ MC (raw)")
+        step_with_band(ax, edges, *curves[FF], qcd_color,
+                       "Anti-iso data $-$ MC $\\times$ FF (QCD est.)")
 
         ax.set_xlabel("")
         ax.set_ylabel("Events")
