@@ -1,0 +1,57 @@
+# wham analysis config — mu-tau channel, Run3 2024
+# Run with:  wham plot Configurations/mutau_2024.yaml
+# Per-sample xs/eff are auto-loaded from params.yaml next to this file.
+
+name: mutau_2024
+lumi: 109080.0            # /pb
+data_dir: /eos/home-w/wmatyszk/data_mutau/Run3_2024/mt
+
+selection: >
+  pt_1 > 26 & pt_2 > 25
+  & abs(eta_1) < 2.4 & abs(eta_2) < 2.5
+  & ip_z_1 < 0.2 & ip_z_2 < 0.2
+  & iso_1 < 0.15
+  & idDeepTau2018v2p5VSe_2 >= 2
+  & idDeepTau2018v2p5VSmu_2 >= 4
+  & n_bjets == 2
+
+trigger: "trg_singlemuon == 1 | trg_mt_cross == 1"
+weight: weight
+
+# Order = stack draw order (bottom to top); data is drawn as points.
+processes:
+  QCD:      {kind: qcd, color: "tab:olive"}
+  tt:       {samples: ["TTto*", "ST_tW_*"], color: "tab:purple"}
+  dibosons: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown"}
+  W+jets:   {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "tab:red"}
+  DY_2Mu:   {samples: ["DYto2Mu_*"], color: "tab:blue"}
+  DY_2Tau:  {samples: ["DYto2Tau_*"], color: "tab:orange"}
+  data:     {kind: data, samples: ["Muon0_*", "Muon1_*"], color: "black"}
+
+qcd:
+  method: abcd
+  os: "os == 1"
+  iso: "idDeepTau2018v2p5VSjet_2 >= 5"
+  antiiso: "idDeepTau2018v2p5VSjet_2 > 1 & idDeepTau2018v2p5VSjet_2 < 5"
+
+variables:
+  pt_1:    {bins: 24, range: [20, 80],  label: "$p_{T}^{\\mu}$ [GeV]"}
+  pt_2:    {bins: 24, range: [20, 80],  label: "$p_{T}^{\\tau_{h}}$ [GeV]"}
+  m_vis:   {bins: 40, range: [0, 200],  label: "$m_{vis}$ [GeV]"}
+  mt_tot:  {bins: 40, range: [0, 200],  label: "$m_{T}^{tot}$ [GeV]"}
+  mt_1:    {bins: 40, range: [0, 200],  label: "$m_{T}(\\mu)$ [GeV]"}
+  mt_2:    {bins: 40, range: [0, 200],  label: "$m_{T}(\\tau_{h})$ [GeV]"}
+  met_pt:  {bins: 40, range: [0, 200],  label: "$p_{T}^{miss}$ [GeV]"}
+  met_phi: {bins: 63, range: [-3.14159, 3.14159], label: "$\\phi^{miss}$", kind: angle}
+  dR:      {bins: 50, range: [0, 5],    label: "$\\Delta R(\\mu, \\tau_{h})$"}
+  aco_mu_rho: {bins: 8, range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\mu\\rho)$", kind: angle}
+
+plots:
+  control:    [pt_1, pt_2, m_vis, mt_tot, mt_1, mt_2, met_pt, met_phi, dR]
+  resolution:
+    - [pt_1, pt_2]
+    - [mt_tot, m_vis]
+  datamc:     [pt_1, pt_2, m_vis, mt_tot, mt_1, mt_2, met_pt, met_phi, dR]
+  cp:
+    - {var: aco_mu_rho, even: wt_cp_sm, odd: wt_cp_ps}
+  display3d:  {sample: "TTto2L2Nu", n_events: 3}

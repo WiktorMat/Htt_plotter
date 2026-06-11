@@ -1,0 +1,40 @@
+# wham fit config — CP acoplanarity fit (aco_mu_rho)
+# Run with:  wham fit cp_fit
+#
+# mode: cp    -> signal split into CP-even/CP-odd templates from wt_cp weights,
+#                POI alpha with yields cos^2(alpha)*even + sin^2(alpha)*odd.
+# mode: rate  -> plain signal-strength fit (POI r) on the same distribution.
+#
+# NOTE: current samples have no Higgs signal; DY_2Tau stands in as "signal"
+# and its CP weights are degenerate (even == odd). Set toy.asymmetry to a
+# nonzero value (e.g. 0.3) to inject an artificial modulation and exercise
+# the alpha fit end-to-end — every output is then labeled TOY.
+
+name: cp_mu_rho
+analysis: mutau_2024
+variable: aco_mu_rho
+mode: cp
+signal: DY_2Tau
+bin: mt_SR
+
+asimov:
+  enabled: true            # fit the Asimov dataset (combine -t -1)
+  parameters: {}           # injected truth, e.g. {alpha: 0.4}
+
+toy:
+  asymmetry: 0.0           # 0 = physics templates; nonzero = labeled TOY
+
+scan:
+  points: 60
+  range: [0.0, 1.5708]     # alpha in [0, pi/2]
+
+auto_mc_stats: 10
+
+systematics:
+  # lumi on simulated processes only — QCD is data-driven
+  - {name: lumi_13p6TeV, effect: lnN, processes: [tt, dibosons, "W+jets", "DY_*"], scaleFactor: 1.025}
+  - {name: xsec_tt,      effect: lnN, processes: [tt],         scaleFactor: 1.05}
+  - {name: xsec_vv,      effect: lnN, processes: [dibosons],   scaleFactor: 1.06}
+  - {name: xsec_w,       effect: lnN, processes: ["W+jets"],   scaleFactor: 1.05}
+  - {name: xsec_dy,      effect: lnN, processes: ["DY_*"],     scaleFactor: 1.02}
+  - {name: norm_qcd,     effect: lnN, processes: [QCD],        scaleFactor: 1.30}

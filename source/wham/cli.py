@@ -1,0 +1,417 @@
+"""wham command line interface."""
+
+from __future__ import annotations
+
+import sys
+import time
+from pathlib import Path
+
+import click
+from rich.console import Console
+from rich.table import Table
+
+from wham import util
+from wham.config import AnalysisConfig, Sample, discover_samples, load_config, sample_scale
+
+console = Console()
+
+
+def _resolve_config(config: str | None) -> Path:
+    """Accept a path, a bare name (Configurations/<name>.yaml), or nothing
+    (when exactly one analysis YAML exists)."""
+    config_dir = util.repo_root() / "Configurations"
+
+    if config is None:
+        candidates = [p for p in sorted(config_dir.glob("*.yaml")) if p.name != "params.yaml"]
+        if len(candidates) == 1:
+            return candidates[0]
+        names = ", ".join(p.stem for p in candidates) or "<none>"
+        console.print(
+            f"[red bold]Choose a config:[/red bold] found {len(candidates)} in "
+            f"{config_dir} ({names}). Run e.g. `wham plot <name>`."
+        )
+        sys.exit(1)
+
+    path = Path(config)
+    if path.is_file():
+        return path
+    candidate = config_dir / f"{config}.yaml"
+    if candidate.is_file():
+        return candidate
+    console.print(
+        f"[red bold]Config not found:[/red bold] no file '{config}' and no "
+        f"{candidate}"
+    )
+    sys.exit(1)
+
+
+def _load(config: str | None) -> tuple[AnalysisConfig, list[Sample]]:
+    config_path = _resolve_config(config)
+    try:
+        cfg = load_config(config_path)
+    except Exception as e:
+        console.print(f"[red bold]Config error:[/red bold] {e}")
+        sys.exit(1)
+    try:
+        samples, warnings = discover_samples(cfg)
+    except Exception as e:
+        console.print(f"[red bold]Sample discovery error:[/red bold] {e}")
+        sys.exit(1)
+    for w in warnings:
+        console.print(f"[yellow]Warning:[/yellow] {w}")
+    if not samples:
+        console.print("[red bold]No samples found.[/red bold]")
+        sys.exit(1)
+    return cfg, samples
+
+
+def _families(cfg: AnalysisConfig, only: tuple[str, ...]) -> list[str]:
+    configured = []
+    if cfg.plots.control:
+        configured.append("control")
+    if cfg.plots.resolution:
+        configured.append("resolution")
+    if cfg.plots.datamc:
+        configured.append("datamc")
+    if cfg.plots.cp:
+        configured.append("cp")
+    if cfg.plots.display3d is not None:
+        configured.append("display3d")
+    if not only:
+        return configured
+    unknown = set(only) - set(configured)
+    if unknown:
+        console.print(
+            f"[red bold]Unknown/unconfigured families:[/red bold] {sorted(unknown)} "
+            f"(configured: {configured})"
+        )
+        sys.exit(1)
+    return [f for f in configured if f in only]
+
+
+@click.group()
+def main() -> None:
+    """Fast H->tautau plotter: validated configs, skim + histogram caches."""
+
+
+# ---------------------------------------------------------------- inspect
+
+
+@main.command()
+@click.argument("config_path", required=False)
+@click.option("--columns", "show_columns", is_flag=True, help="Show required column availability.")
+@click.option("--yields", "show_yields", is_flag=True, help="Show per-process yields from the histogram cache.")
+def inspect(config_path: str, show_columns: bool, show_yields: bool) -> None:
+    """Validate the config and show samples, skims and (optionally) yields."""
+    from wham.skim import find_skim
+
+    cfg, samples = _load(config_path)
+    required = cfg.required_columns()
+
+    table = Table(title=f"{cfg.name} — {len(samples)} samples")
+    table.add_column("Sample")
+    table.add_column("Process")
+    table.add_column("Kind")
+    table.add_column("Size", justify="right")
+    table.add_column("Scale (lumi*xs*f/eff)", justify="right")
+    table.add_column("Skim")
+
+    for s in samples:
+        info = find_skim(cfg.name, s, required)
+        scale = sample_scale(s, cfg.lumi)
+        table.add_row(
+            s.name,
+            s.process,
+            s.kind,
+            f"{s.size / 1e6:,.0f} MB",
+            "—" if s.kind == "data" else f"{scale:.3e}",
+            "[green]fresh[/green]" if info else "[yellow]missing[/yellow]",
+        )
+    console.print(table)
+    console.print(
+        f"Families configured: {_families(cfg, ())} | "
+        f"required columns: {len(required)} | lumi: {cfg.lumi:g} /pb"
+    )
+
+    if show_columns:
+        import pyarrow.parquet as pq
+
+        schema = set(pq.read_schema(samples[0].path).names)
+        col_table = Table(title=f"Required columns (vs schema of {samples[0].name})")
+        col_table.add_column("Column")
+        col_table.add_column("Present")
+        for col in sorted(required):
+            col_table.add_row(
+                col, "[green]yes[/green]" if col in schema else "[red]NO[/red]"
+            )
+        console.print(col_table)
+
+    if show_yields:
+        from wham.histcache import load_all_cached
+        from wham.fill import REGION_NOMINAL
+
+        cached = load_all_cached(cfg, samples)
+        if not cached:
+            console.print("[yellow]No cached histograms — run `wham plot` first.[/yellow]")
+            return
+        ytable = Table(title="Yields (from histogram cache)")
+        ytable.add_column("Family/Variable")
+        ytable.add_column("Process")
+        ytable.add_column("Region")
+        ytable.add_column("Yield", justify="right")
+        for (family, var), h in sorted(cached.items()):
+            for proc in h.axes["process"]:
+                for region in h.axes["region"]:
+                    val = h[{"process": proc, "region": region, "variation": "nominal"}]
+                    total = float(val.view()["value"].sum())
+                    if total != 0:
+                        ytable.add_row(f"{family}/{var}", proc, region, f"{total:,.1f}")
+        console.print(ytable)
+
+
+# ---------------------------------------------------------------- skim
+
+
+@main.command()
+@click.argument("config_path", required=False)
+@click.option("--workers", default=6, show_default=True)
+@click.option("--force", is_flag=True, help="Rebuild even if a valid skim exists.")
+@click.option("--prune", is_flag=True, help="Delete superseded skims afterwards.")
+def skim(config_path: str, workers: int, force: bool, prune: bool) -> None:
+    """Build/refresh the local column-pruned skim cache."""
+    from wham.skim import ensure_skims, prune_skims
+
+    cfg, samples = _load(config_path)
+
+    t0 = time.perf_counter()
+    done = {"n": 0}
+
+    def _progress(info) -> None:
+        done["n"] += 1
+        console.print(
+            f"  [green]skimmed[/green] {info.sample}: {info.rows:,} rows, "
+            f"{len(info.columns)} cols -> {info.path.stat().st_size / 1e6:,.0f} MB"
+        )
+
+    skims = ensure_skims(cfg, samples, workers=workers, force=force, on_progress=_progress)
+    dt = time.perf_counter() - t0
+
+    total = sum(i.path.stat().st_size for i in skims.values())
+    console.print(
+        f"Skims ready: {len(skims)}/{len(samples)} samples | built {done['n']} | "
+        f"total {total / 1e9:.2f} GB | {dt:.1f}s"
+    )
+
+    if prune:
+        freed = prune_skims(cfg.name, samples, cfg.required_columns())
+        console.print(f"Pruned {freed / 1e6:,.0f} MB of stale skims")
+
+
+# ---------------------------------------------------------------- clean
+
+
+def _dir_size(path: Path) -> int:
+    if not path.is_dir():
+        return 0
+    return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
+
+
+@main.command()
+@click.argument("config_path", required=False)
+@click.option("--hists", "wipe_hists", is_flag=True,
+              help="Delete the histogram cache (refilled from skims in ~1 min).")
+@click.option("--skims", "wipe_skims", is_flag=True,
+              help="Delete the skim cache (rebuilt from EOS, ~minutes).")
+@click.option("--all", "wipe_all", is_flag=True, help="Delete the whole cache directory.")
+def clean(config_path: str, wipe_hists: bool, wipe_skims: bool, wipe_all: bool) -> None:
+    """Clean caches. Without flags: prune superseded skims and report sizes."""
+    import shutil
+
+    root = util.cache_root()
+    if wipe_all:
+        wipe_hists = wipe_skims = True
+
+    if wipe_hists or wipe_skims:
+        for enabled, sub in ((wipe_skims, "skims"), (wipe_hists, "hists")):
+            target = root / sub
+            if not enabled:
+                continue
+            if not target.is_dir():
+                console.print(f"  {target}: nothing to remove")
+                continue
+            size = _dir_size(target)
+            shutil.rmtree(target)
+            console.print(f"  [green]removed[/green] {target} ({size / 1e9:.2f} GB)")
+        return
+
+    from wham.skim import prune_skims
+
+    cfg, samples = _load(config_path)
+    freed = prune_skims(cfg.name, samples, cfg.required_columns())
+    console.print(f"Pruned {freed / 1e6:,.0f} MB of superseded skims")
+    for sub in ("skims", "hists"):
+        console.print(f"  {root / sub}: {_dir_size(root / sub) / 1e9:.2f} GB")
+
+
+# ---------------------------------------------------------------- plot
+
+
+@main.command()
+@click.argument("config_path", required=False)
+@click.option("--only", multiple=True, help="Limit to plot families (repeatable).")
+@click.option("--var", "only_vars", multiple=True, help="Limit to variables (repeatable).")
+@click.option("--workers", default=6, show_default=True)
+@click.option("--no-cache", is_flag=True, help="Rebuild skims and histograms from scratch.")
+def plot(config_path: str, only: tuple[str, ...], only_vars: tuple[str, ...],
+         workers: int, no_cache: bool) -> None:
+    """Full pipeline: skim -> fill -> QCD -> render (cache-aware)."""
+    from wham.fill import fill_all
+    from wham.render import render_families
+    from wham.skim import ensure_skims
+
+    cfg, samples = _load(config_path)
+    families = _families(cfg, only)
+
+    t0 = time.perf_counter()
+    skims = ensure_skims(cfg, samples, workers=workers, force=no_cache)
+    t_skim = time.perf_counter()
+    console.print(f"Skims ready in {t_skim - t0:.1f}s")
+
+    hists = fill_all(
+        cfg, samples, skims,
+        families=families, only_vars=only_vars or None,
+        workers=workers, use_cache=not no_cache, console=console,
+    )
+    t_fill = time.perf_counter()
+    console.print(f"Histograms ready in {t_fill - t_skim:.1f}s")
+
+    outdir = cfg.resolved_output_dir()
+    render_families(cfg, hists, skims, families=families,
+                    only_vars=only_vars or None, outdir=outdir, console=console)
+    console.print(
+        f"[bold green]Done[/bold green] in {time.perf_counter() - t0:.1f}s -> {outdir}/"
+    )
+
+
+# ---------------------------------------------------------------- render
+
+
+@main.command()
+@click.argument("config_path", required=False)
+@click.option("--only", multiple=True, help="Limit to plot families (repeatable).")
+@click.option("--var", "only_vars", multiple=True, help="Limit to variables (repeatable).")
+def render(config_path: str, only: tuple[str, ...], only_vars: tuple[str, ...]) -> None:
+    """Re-render plots from cached histograms only (seconds; no event data)."""
+    from wham.fill import fill_all
+    from wham.render import render_families
+    from wham.skim import find_skim
+
+    cfg, samples = _load(config_path)
+    families = _families(cfg, only)
+    required = cfg.required_columns()
+
+    skims = {}
+    for s in samples:
+        info = find_skim(cfg.name, s, required)
+        if info is None:
+            console.print(
+                f"[red bold]No skim for {s.name}[/red bold] — histogram cache cannot be "
+                "validated. Run `wham plot` first."
+            )
+            sys.exit(1)
+        skims[s.name] = info
+
+    hists = fill_all(
+        cfg, samples, skims,
+        families=families, only_vars=only_vars or None,
+        workers=1, use_cache=True, cache_only=True, console=console,
+    )
+    outdir = cfg.resolved_output_dir()
+    render_families(cfg, hists, skims, families=families,
+                    only_vars=only_vars or None, outdir=outdir, console=console)
+    console.print(f"[bold green]Rendered[/bold green] -> {outdir}/")
+
+
+# ---------------------------------------------------------------- fit
+
+
+@main.command()
+@click.argument("config_path", required=False)
+@click.option("--workers", default=6, show_default=True)
+@click.option("--no-cache", is_flag=True, help="Rebuild skims and histograms from scratch.")
+@click.option("--force", is_flag=True, help="Rerun all combine stages even if fresh.")
+@click.option("--datacard-only", is_flag=True, help="Stop after exporting datacard + shapes.")
+@click.option("--no-render", is_flag=True, help="Skip prefit/postfit/NLL plots.")
+def fit(config_path: str, workers: int, no_cache: bool, force: bool,
+        datacard_only: bool, no_render: bool) -> None:
+    """Datacard export + Combine fit (FitDiagnostics + NLL scan), cache-aware."""
+    import time as _time
+
+    from wham.combine import run_fit
+    from wham.fill import build_fill_spec, fill_all, hist_keys, spec_extras
+    from wham.fitconfig import augmented_analysis, load_fit_config, resolve_fit_config
+    from wham.histcache import cache_key
+    from wham.skim import ensure_skims
+
+    try:
+        fit_path = resolve_fit_config(config_path)
+        fit_cfg, base_cfg = load_fit_config(fit_path)
+    except Exception as e:
+        console.print(f"[red bold]Fit config error:[/red bold] {e}")
+        sys.exit(1)
+
+    cfg, families = augmented_analysis(fit_cfg, base_cfg)
+    console.print(
+        f"[bold]{fit_cfg.name}[/bold]: mode={fit_cfg.mode} | variable={fit_cfg.variable} | "
+        f"signal={fit_cfg.signal} | POI={fit_cfg.poi()}"
+        + (" | [crimson]Asimov[/crimson]" if fit_cfg.asimov.enabled else "")
+        + (f" | [crimson]TOY A={fit_cfg.toy.asymmetry:g}[/crimson]"
+           if fit_cfg.toy.asymmetry else "")
+    )
+
+    try:
+        samples, warnings = discover_samples(cfg)
+    except Exception as e:
+        console.print(f"[red bold]Sample discovery error:[/red bold] {e}")
+        sys.exit(1)
+    for w in warnings:
+        console.print(f"[yellow]Warning:[/yellow] {w}")
+
+    t0 = time.perf_counter()
+    skims = ensure_skims(cfg, samples, workers=workers, force=no_cache)
+    hists = fill_all(cfg, samples, skims, families=families,
+                     only_vars=(fit_cfg.variable,), workers=workers,
+                     use_cache=not no_cache, console=console)
+    console.print(f"Histograms ready in {time.perf_counter() - t0:.1f}s")
+
+    spec = build_fill_spec(cfg, families=families, only_vars=(fit_cfg.variable,))
+    extras = spec_extras(spec)
+    input_keys = {
+        (family, name): cache_key(cfg, samples, skims, spec, family, name, vcfg,
+                                  extra=extras.get((family, name)))
+        for family, name, vcfg in hist_keys(spec)
+    }
+
+    try:
+        fitdir = run_fit(fit_cfg, cfg, hists, input_keys, console=console,
+                         force=force, datacard_only=datacard_only)
+    except Exception as e:
+        console.print(f"[red bold]Fit failed:[/red bold] {e}")
+        sys.exit(1)
+
+    if datacard_only:
+        console.print(f"[bold green]Datacard ready[/bold green] -> {fitdir}/")
+        return
+
+    if not no_render:
+        from wham.render.fit import render_fit
+
+        render_fit(fit_cfg, cfg, fitdir, console)
+
+    console.print(
+        f"[bold green]Fit done[/bold green] in {time.perf_counter() - t0:.1f}s -> {fitdir}/"
+    )
+
+
+if __name__ == "__main__":
+    main()

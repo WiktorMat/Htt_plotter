@@ -1,0 +1,32 @@
+# TOY variant of cp_fit.yaml: injects an artificial +-0.3*cos(phi) asymmetry
+# into the DY_2Tau CP templates so the alpha fit has something to measure.
+# The Asimov truth is alpha = 0.4; the scan should recover it.
+# Every plot is stamped TOY — results are machinery checks, not physics.
+
+name: cp_mu_rho_toy
+analysis: mutau_2024
+variable: aco_mu_rho
+mode: cp
+signal: DY_2Tau
+bin: mt_SR
+
+asimov:
+  enabled: true
+  parameters: {alpha: 0.4}
+
+toy:
+  asymmetry: 0.3
+
+scan:
+  points: 60
+  range: [0.0, 1.5708]
+
+auto_mc_stats: 10
+
+systematics:
+  - {name: lumi_13p6TeV, effect: lnN, processes: [tt, dibosons, "W+jets", "DY_*"], scaleFactor: 1.025}
+  - {name: xsec_tt,      effect: lnN, processes: [tt],         scaleFactor: 1.05}
+  - {name: xsec_vv,      effect: lnN, processes: [dibosons],   scaleFactor: 1.06}
+  - {name: xsec_w,       effect: lnN, processes: ["W+jets"],   scaleFactor: 1.05}
+  - {name: xsec_dy,      effect: lnN, processes: ["DY_*"],     scaleFactor: 1.02}
+  - {name: norm_qcd,     effect: lnN, processes: [QCD],        scaleFactor: 1.30}

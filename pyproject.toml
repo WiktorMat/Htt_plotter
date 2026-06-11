@@ -1,3 +1,9 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+markers = [
+    "combine: integration tests that run the standalone Combine container",
+]
+addopts = "-m 'not combine'"

@@ -1,14 +1,9 @@
-# Python bytecode
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
+.pytest_cache/
+*.egg-info/
 
-# Plotter outputs / artifacts
-output/
+# Outputs and caches (derived data, rebuilt on demand)
 plots/
-plotter.log
-test_images/
-
-# Local config generations
-Configurations/**/__pycache__/
-Configurations/**/files_old.json
+.cache/

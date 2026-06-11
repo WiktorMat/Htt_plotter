@@ -1,0 +1,14 @@
+#!/bin/bash
+# wham launcher: sets up the LCG environment and paths, then runs the CLI.
+# Symlink this into a PATH dir (e.g. ~/.local/bin) and just type: wham plot
+
+LCG_SETUP=/cvmfs/sft.cern.ch/lcg/views/LCG_107/x86_64-el9-gcc13-opt/setup.sh
+REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+
+# Source the LCG view only if the needed stack isn't already importable.
+if ! python3 -c "import pyarrow, hist, mplhep, pydantic, click" >/dev/null 2>&1; then
+    source "$LCG_SETUP" || { echo "wham: failed to source $LCG_SETUP" >&2; exit 1; }
+fi
+
+export PYTHONPATH="$REPO/source:$PYTHONPATH"
+exec python3 -m wham.cli "$@"

@@ -1,0 +1,333 @@
+"""Analysis configuration: one validated YAML per analysis + sample discovery."""
+
+from __future__ import annotations
+
+import fnmatch
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+
+import yaml
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
+
+from wham.expr import ExprError, parse
+
+FAMILIES = ("control", "resolution", "datamc", "cp", "fitcp", "display3d")
+
+# Columns the 3D display needs if that family is configured.
+DISPLAY3D_COLUMNS = {"pt_1", "eta_1", "phi_1", "pt_2", "eta_2", "phi_2", "met_pt", "met_phi"}
+
+
+class _Model(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class VariableCfg(_Model):
+    bins: int = Field(gt=0)
+    range: tuple[float, float]
+    label: str | None = None
+    kind: Literal["scalar", "angle"] = "scalar"
+    relative: bool = True  # resolution: (reco-ref)/ref vs reco-ref
+
+    @field_validator("range")
+    @classmethod
+    def _ordered(cls, v: tuple[float, float]) -> tuple[float, float]:
+        if not v[0] < v[1]:
+            raise ValueError(f"range must be increasing, got {v}")
+        return v
+
+
+class ProcessCfg(_Model):
+    samples: list[str] = []
+    color: str = "tab:gray"
+    kind: Literal["mc", "data", "qcd"] = "mc"
+
+    @model_validator(mode="after")
+    def _samples_match_kind(self) -> "ProcessCfg":
+        if self.kind == "qcd" and self.samples:
+            raise ValueError("a kind=qcd process is derived and must not list samples")
+        if self.kind != "qcd" and not self.samples:
+            raise ValueError("process must list at least one sample pattern")
+        return self
+
+
+class QCDCfg(_Model):
+    method: Literal["ss", "abcd"] = "ss"
+    os: str = "os == 1"
+    iso: str | None = None
+    antiiso: str | None = None
+    ff: float = 1.0
+
+    @model_validator(mode="after")
+    def _abcd_needs_regions(self) -> "QCDCfg":
+        if self.method == "abcd" and not (self.iso and self.antiiso):
+            raise ValueError("qcd.method=abcd requires both 'iso' and 'antiiso' expressions")
+        return self
+
+
+class SampleParams(_Model):
+    xs: float = Field(gt=0)
+    eff: float = Field(gt=0)  # effective number of generated events
+    filter_efficiency: float = 1.0
+
+
+class CPPlotCfg(_Model):
+    var: str
+    even: str = "wt_cp_sm"
+    odd: str = "wt_cp_ps"
+
+
+class Display3DCfg(_Model):
+    sample: str
+    n_events: int = Field(default=1, gt=0)
+
+
+class PlotsCfg(_Model):
+    control: list[str] = []
+    resolution: list[tuple[str, str]] = []  # [reco, reference] pairs
+    datamc: list[str] = []
+    cp: list[CPPlotCfg] = []
+    # CP hypothesis templates in the fit signal region; set programmatically
+    # by `wham fit`, normally not written by hand.
+    fitcp: list[CPPlotCfg] = []
+    display3d: Display3DCfg | None = None
+
+
+class AnalysisConfig(_Model):
+    name: str
+    lumi: float = Field(gt=0)
+    data_dir: Path
+    output_dir: Path | None = None
+    selection: str
+    trigger: str | None = None  # applied to datamc/cp fills only
+    weight: str = "weight"
+    processes: dict[str, ProcessCfg]
+    qcd: QCDCfg = QCDCfg()
+    sample_params: dict[str, SampleParams] = {}
+    variables: dict[str, VariableCfg]
+    plots: PlotsCfg = PlotsCfg()
+
+    # ---- validators -------------------------------------------------
+
+    @field_validator("data_dir")
+    @classmethod
+    def _dir_exists(cls, v: Path) -> Path:
+        if not v.is_dir():
+            raise ValueError(f"data_dir does not exist: {v}")
+        return v
+
+    @model_validator(mode="after")
+    def _expressions_parse(self) -> "AnalysisConfig":
+        for label, src in [
+            ("selection", self.selection),
+            ("trigger", self.trigger),
+            ("weight", self.weight),
+            ("qcd.os", self.qcd.os),
+            ("qcd.iso", self.qcd.iso),
+            ("qcd.antiiso", self.qcd.antiiso),
+        ]:
+            if src is None:
+                continue
+            try:
+                parse(src)
+            except ExprError as e:
+                raise ValueError(f"invalid expression in '{label}': {e}") from None
+        return self
+
+    @model_validator(mode="after")
+    def _plot_vars_defined(self) -> "AnalysisConfig":
+        used: dict[str, str] = {}
+        for v in self.plots.control:
+            used[v] = "plots.control"
+        for reco, ref in self.plots.resolution:
+            used[reco] = used[ref] = "plots.resolution"
+        for v in self.plots.datamc:
+            used[v] = "plots.datamc"
+        for c in self.plots.cp:
+            used[c.var] = "plots.cp"
+        for c in self.plots.fitcp:
+            used[c.var] = "plots.fitcp"
+        missing = {v: fam for v, fam in used.items() if v not in self.variables}
+        if missing:
+            listed = ", ".join(f"'{v}' ({fam})" for v, fam in sorted(missing.items()))
+            raise ValueError(f"plotted variables not defined in 'variables': {listed}")
+        return self
+
+    @model_validator(mode="after")
+    def _datamc_needs_data(self) -> "AnalysisConfig":
+        if self.plots.datamc:
+            n_data = sum(1 for p in self.processes.values() if p.kind == "data")
+            if n_data != 1:
+                raise ValueError(
+                    f"plots.datamc requires exactly one kind=data process, found {n_data}"
+                )
+        n_qcd = sum(1 for p in self.processes.values() if p.kind == "qcd")
+        if n_qcd > 1:
+            raise ValueError(f"at most one kind=qcd process allowed, found {n_qcd}")
+        return self
+
+    # ---- derived ----------------------------------------------------
+
+    def resolved_output_dir(self) -> Path:
+        from wham import util
+
+        base = self.output_dir if self.output_dir is not None else Path("plots") / self.name
+        if not base.is_absolute():
+            base = util.repo_root() / base
+        return base
+
+    def stack_order(self) -> list[str]:
+        """MC + QCD process names in YAML order (= bottom-to-top stack)."""
+        return [n for n, p in self.processes.items() if p.kind != "data"]
+
+    def data_process(self) -> str | None:
+        for n, p in self.processes.items():
+            if p.kind == "data":
+                return n
+        return None
+
+    def qcd_process(self) -> str | None:
+        for n, p in self.processes.items():
+            if p.kind == "qcd":
+                return n
+        return None
+
+    def required_columns(self) -> frozenset[str]:
+        """Union of every column any configured fill could touch."""
+        cols: set[str] = {"weight", "os"}
+        for src in (self.selection, self.trigger, self.weight,
+                    self.qcd.os, self.qcd.iso, self.qcd.antiiso):
+            if src:
+                cols |= parse(src).columns
+        cols.update(self.plots.control)
+        for reco, ref in self.plots.resolution:
+            cols.update((reco, ref))
+        cols.update(self.plots.datamc)
+        for c in (*self.plots.cp, *self.plots.fitcp):
+            cols.update((c.var, c.even, c.odd))
+        if self.plots.display3d is not None:
+            cols |= DISPLAY3D_COLUMNS
+        return frozenset(cols)
+
+
+# ---- loading ---------------------------------------------------------
+
+
+def load_config(path: str | Path) -> AnalysisConfig:
+    path = Path(path)
+    with open(path, encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: top level must be a mapping")
+
+    cfg = AnalysisConfig.model_validate(raw)
+
+    if not cfg.sample_params:
+        side = path.parent / "params.yaml"
+        if side.exists():
+            cfg = cfg.model_copy(update={"sample_params": _load_params_file(side)})
+    return cfg
+
+
+def _load_params_file(path: Path) -> dict[str, SampleParams]:
+    """Side file in the existing Configurations/*/params.yaml format."""
+    with open(path, encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    out: dict[str, SampleParams] = {}
+    for name, entry in raw.items():
+        if name == "lumi" or not isinstance(entry, dict):
+            continue  # analysis YAML owns lumi
+        out[name] = SampleParams.model_validate(entry)
+    return out
+
+
+# ---- sample discovery ------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Sample:
+    name: str
+    process: str
+    kind: str  # mc | data
+    variation: str
+    path: Path
+    size: int
+    mtime_ns: int
+    params: SampleParams | None
+
+    @property
+    def scale(self) -> float:
+        """Constant factor multiplying the per-event weight (1.0 for data)."""
+        return 1.0
+
+
+def discover_samples(
+    cfg: AnalysisConfig, *, variation: str = "nominal"
+) -> tuple[list[Sample], list[str]]:
+    """Match data_dir subdirectories against process sample patterns.
+
+    Returns (samples, warnings). Raises on ambiguous matches or missing
+    MC params — those are config errors, not conditions to limp past.
+    """
+    candidates = sorted(
+        d.name for d in cfg.data_dir.iterdir()
+        if d.is_dir() and (d / variation / "merged.parquet").is_file()
+    )
+
+    warnings: list[str] = []
+    assignment: dict[str, str] = {}
+    for proc_name, proc in cfg.processes.items():
+        for pattern in proc.samples:
+            matched = fnmatch.filter(candidates, pattern)
+            if not matched:
+                warnings.append(f"pattern '{pattern}' (process '{proc_name}') matched nothing")
+            for sample_name in matched:
+                prev = assignment.get(sample_name)
+                if prev is not None and prev != proc_name:
+                    raise ValueError(
+                        f"sample '{sample_name}' matches both process '{prev}' and "
+                        f"'{proc_name}' — make the patterns disjoint"
+                    )
+                assignment[sample_name] = proc_name
+
+    missing_params = [
+        s for s, p in sorted(assignment.items())
+        if cfg.processes[p].kind == "mc" and s not in cfg.sample_params
+    ]
+    if missing_params:
+        raise ValueError(
+            "MC samples without sample_params (xs/eff): " + ", ".join(missing_params)
+        )
+
+    samples: list[Sample] = []
+    for sample_name, proc_name in sorted(assignment.items()):
+        kind = cfg.processes[proc_name].kind
+        path = cfg.data_dir / sample_name / variation / "merged.parquet"
+        st = path.stat()
+        samples.append(
+            Sample(
+                name=sample_name,
+                process=proc_name,
+                kind=kind,
+                variation=variation,
+                path=path,
+                size=st.st_size,
+                mtime_ns=st.st_mtime_ns,
+                params=cfg.sample_params.get(sample_name),
+            )
+        )
+    return samples, warnings
+
+
+def sample_scale(sample: Sample, lumi: float) -> float:
+    """lumi * xs * filter_efficiency / eff for MC; 1.0 for data."""
+    if sample.kind == "data" or sample.params is None:
+        return 1.0
+    p = sample.params
+    return lumi * p.xs * p.filter_efficiency / p.eff
