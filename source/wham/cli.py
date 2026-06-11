@@ -402,85 +402,51 @@ def render(config_path: str, only: tuple[str, ...], only_vars: tuple[str, ...]) 
 
 
 @main.command()
-@click.argument("target", required=False)
-@click.option("--signal", default=None,
-              help="Signal process for direct variable fits (default: top of the stack).")
-@click.option("--asimov", is_flag=True,
-              help="Direct variable fits: fit the Asimov dataset instead of data.")
+@click.argument("config", required=False)
 @click.option("--workers", default=6, show_default=True)
 @click.option("--no-cache", is_flag=True, help="Rebuild skims and histograms from scratch.")
 @click.option("--force", is_flag=True, help="Rerun all combine stages even if fresh.")
 @click.option("--datacard-only", is_flag=True, help="Stop after exporting datacard + shapes.")
-@click.option("--no-render", is_flag=True, help="Skip prefit/postfit/NLL plots.")
-def fit(target: str, signal: str, asimov: bool, workers: int, no_cache: bool,
+@click.option("--no-render", is_flag=True, help="Skip prefit/postfit/pulls/NLL plots.")
+def fit(config: str, workers: int, no_cache: bool,
         force: bool, datacard_only: bool, no_render: bool) -> None:
-    """Datacard export + Combine fit (FitDiagnostics + NLL scan), cache-aware.
+    """Datacard export + Combine fit, fully driven by a fit config.
 
-    TARGET is a fit YAML (Configurations/fits/<name>.yaml) or simply a
-    variable of the analysis config (e.g. `wham fit m_vis`), which runs a
-    default rate fit: signal strength of the top stack process, lumi lnN on
-    simulation, free-floating QCD normalization, observed data.
+    CONFIG is a fit YAML — a path, or a bare name resolved in
+    Configurations/fits/. The YAML declares everything: POIs, the yield
+    model per process, categories, systematics and scans. Start from
+    Configurations/fits/TEMPLATE.yaml.
     """
-    import time as _time
-
     from wham.combine import run_fit
     from wham.fill import build_fill_spec, fill_all, hist_keys, spec_extras
-    from wham.fitconfig import (augmented_analysis, load_fit_config, match_variable,
-                                resolve_fit_config, synthesize_fit_config)
+    from wham.fitconfig import (
+        category_analysis,
+        fit_families,
+        load_fit_config,
+        resolve_fit_config,
+        union_analysis,
+    )
     from wham.histcache import cache_key
     from wham.skim import ensure_skims
 
-    fit_path = None
     try:
-        fit_path = resolve_fit_config(target)
-    except FileNotFoundError as e:
-        if target is None:
-            console.print(f"[red bold]Fit config error:[/red bold] {e}")
-            console.print("Tip: `wham fit <variable>` (e.g. m_vis) runs a default rate fit.")
-            sys.exit(1)
+        fit_path = resolve_fit_config(config)
+        fit_cfg, base_cfg = load_fit_config(fit_path)
+    except Exception as e:
+        console.print(f"[red bold]Fit config error:[/red bold] {e}")
+        sys.exit(1)
 
-    if fit_path is not None:
-        try:
-            fit_cfg, base_cfg = load_fit_config(fit_path)
-        except Exception as e:
-            console.print(f"[red bold]Fit config error:[/red bold] {e}")
-            sys.exit(1)
-        if signal or asimov:
-            console.print("[yellow]--signal/--asimov only apply to direct variable "
-                          "fits; set them in the fit YAML instead.[/yellow]")
-    else:
-        # not a fit YAML: treat the argument as a variable name
-        try:
-            base_cfg = load_config(_resolve_config(None))
-        except Exception as e:
-            console.print(f"[red bold]Config error:[/red bold] {e}")
-            sys.exit(1)
-        var = match_variable(target, base_cfg)
-        if var is None:
-            console.print(
-                f"[red bold]Unknown fit target:[/red bold] '{target}' is neither a "
-                f"fit config in Configurations/fits/ nor a variable of "
-                f"'{base_cfg.name}' ({', '.join(sorted(base_cfg.variables))})"
-            )
-            sys.exit(1)
-        try:
-            fit_cfg = synthesize_fit_config(base_cfg, var, signal=signal, asimov=asimov)
-        except ValueError as e:
-            console.print(f"[red bold]Fit config error:[/red bold] {e}")
-            sys.exit(1)
-        console.print(f"[dim]no fit YAML — default rate fit on '{var}'[/dim]")
-
-    cfg, families = augmented_analysis(fit_cfg, base_cfg)
+    families = fit_families(fit_cfg)
     console.print(
-        f"[bold]{fit_cfg.name}[/bold]: mode={fit_cfg.mode} | variable={fit_cfg.variable} | "
-        f"signal={fit_cfg.signal} | POI={fit_cfg.poi()}"
+        f"[bold]{fit_cfg.name}[/bold]: POIs {', '.join(fit_cfg.model.pois)} | "
+        f"categories {', '.join(c.name for c in fit_cfg.categories)}"
         + (" | [crimson]Asimov[/crimson]" if fit_cfg.asimov.enabled else "")
         + (f" | [crimson]TOY A={fit_cfg.toy.asymmetry:g}[/crimson]"
            if fit_cfg.toy.asymmetry else "")
     )
 
     try:
-        samples, warnings = discover_samples(cfg)
+        samples, warnings = discover_samples(base_cfg)
     except Exception as e:
         console.print(f"[red bold]Sample discovery error:[/red bold] {e}")
         sys.exit(1)
@@ -488,23 +454,30 @@ def fit(target: str, signal: str, asimov: bool, workers: int, no_cache: bool,
         console.print(f"[yellow]Warning:[/yellow] {w}")
 
     t0 = time.perf_counter()
-    skims = ensure_skims(cfg, samples, workers=workers, force=no_cache,
+    # one skim pass covering every category's columns, then per-category fills
+    union_cfg = union_analysis(fit_cfg, base_cfg)
+    skims = ensure_skims(union_cfg, samples, workers=workers, force=no_cache,
                          on_progress=_skim_progress(len(samples)))
-    hists = fill_all(cfg, samples, skims, families=families,
-                     only_vars=(fit_cfg.variable,), workers=workers,
-                     use_cache=not no_cache, console=console)
+
+    hists_by_cat: dict[str, dict] = {}
+    input_keys: dict[tuple[str, str, str], str] = {}
+    for cat in fit_cfg.categories:
+        ccfg = category_analysis(fit_cfg, base_cfg, cat)
+        hists_by_cat[cat.name] = fill_all(
+            ccfg, samples, skims, families=families, only_vars=(cat.variable,),
+            workers=workers, use_cache=not no_cache, sidecars=False, console=console,
+        )
+        spec = build_fill_spec(ccfg, families=families, only_vars=(cat.variable,))
+        extras = spec_extras(spec)
+        for family, name, vcfg in hist_keys(spec):
+            input_keys[(cat.name, family, name)] = cache_key(
+                ccfg, samples, skims, spec, family, name, vcfg,
+                extra=extras.get((family, name)),
+            )
     console.print(f"Histograms ready in {time.perf_counter() - t0:.1f}s")
 
-    spec = build_fill_spec(cfg, families=families, only_vars=(fit_cfg.variable,))
-    extras = spec_extras(spec)
-    input_keys = {
-        (family, name): cache_key(cfg, samples, skims, spec, family, name, vcfg,
-                                  extra=extras.get((family, name)))
-        for family, name, vcfg in hist_keys(spec)
-    }
-
     try:
-        fitdir = run_fit(fit_cfg, cfg, hists, input_keys, console=console,
+        fitdir = run_fit(fit_cfg, base_cfg, hists_by_cat, input_keys, console=console,
                          force=force, datacard_only=datacard_only)
     except Exception as e:
         console.print(f"[red bold]Fit failed:[/red bold] {e}")
@@ -517,7 +490,7 @@ def fit(target: str, signal: str, asimov: bool, workers: int, no_cache: bool,
     if not no_render:
         from wham.render.fit import render_fit
 
-        render_fit(fit_cfg, cfg, fitdir, console)
+        render_fit(fit_cfg, base_cfg, fitdir, console)
 
     console.print(
         f"[bold green]Fit done[/bold green] in {time.perf_counter() - t0:.1f}s -> {fitdir}/"

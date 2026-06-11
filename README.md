@@ -1,7 +1,6 @@
 # WHAM-plot
 
 Plotting and fitting framework for the H→ττ (μτ<sub>h</sub>) analysis, Run 3 2024.
-WHAM = Wiktor, Hagop, Artur, Michal.
 
 The package lives in `source/wham/`. It produces four plot families:
 
@@ -26,8 +25,7 @@ The launcher sources the LCG environment itself, so from any directory:
 wham inspect          # validate config, list samples and cache status
 wham plot             # full pipeline
 wham render           # restyle from cache (~seconds)
-wham fit m_vis        # Combine rate fit on any variable (see Fitting below)
-wham fit cp_fit       # fully configured fit from a YAML in Configurations/fits/
+wham fit example      # Combine fit, fully driven by a fit YAML (see Fitting)
 wham qcdcompare       # ABCD vs BDT-FF QCD estimate overlay (see BDT fake factors)
 wham skim             # build/refresh the skim cache
 wham clean            # prune stale skims, report cache sizes
@@ -166,56 +164,68 @@ it just costs the rebuild time.
 ## Fitting (`wham fit`)
 
 Fits run with standalone Combine in an Apptainer container, no CMSSW needed.
+The fitter is generic: `wham fit <config>` is the whole interface, and the
+fit YAML carries the entire statistical model — there are no fit "modes" in
+the code. Start from the fully commented
+[`Configurations/fits/TEMPLATE.yaml`](Configurations/fits/TEMPLATE.yaml);
+[`example.yaml`](Configurations/fits/example.yaml) is the one runnable
+example (a Z→ττ signal-strength fit on m_vis).
 
-The quickest way in is a bare variable name — `wham fit m_vis` (or `mt_tot`,
-`pt_2`, ... anything under `variables:`) runs a default rate fit on the
-observed data: POI `r` scales the top-of-stack process, lumi lnN on
-simulation, and a free-floating QCD normalization. `--signal <process>`
-overrides the signal, `--asimov` fits the Asimov dataset instead. The
-effective configuration is written to the output as `fitconfig.yaml`, ready
-to copy into `Configurations/fits/` and customize.
+A fit config declares:
 
-For full control each fit is its own YAML in `Configurations/fits/`
-referencing an analysis config — `mvis_rate.yaml` / `mt_rate.yaml` are the
-configured versions of the mass fits, `cp_fit.yaml` the CP measurement:
+- **categories** — one entry per datacard bin, fitted simultaneously
+  (`imax N`). Each has its own observable and an optional extra `cut`
+  (e.g. a decay-mode split) on top of the analysis selection.
+- **model.pois** — the parameters of interest, with `init` and `range`.
+- **model.processes** — how yields depend on the POIs. A process is either
+  scaled whole (`{scale: "r"}`) or split into weighted template components,
+  each with its own per-event weight column and scale expression. Anything
+  not listed is a plain background.
+- **systematics** — `lnN` (with `scaleFactor`) and `rateParam` (free-floating
+  normalization, one shared parameter across everything it matches);
+  optional `categories:` restricts one to specific bins. Patterns match the
+  config process names (`W+jets` etc.); sanitization and component templates
+  are resolved internally.
+- **scans** — 1D entries give profiled −2ΔlnL curves, two-POI entries give
+  68/95% CL contour plots. Omitted entirely → one 1D scan per POI.
+- **asimov / toy** — observed data vs Asimov (`combine -t -1`, truth =
+  POI inits overridden by `asimov.parameters`); `toy.asymmetry` modulates
+  2-component processes by (1 ± A·cos x) for machinery validation (outputs
+  stamped TOY).
+
+A three-POI CP-style fit is pure configuration:
 
 ```yaml
-# Configurations/fits/cp_fit.yaml
-name: cp_mu_rho
-analysis: mutau_2024
-variable: aco_mu_rho
-mode: cp                  # cp: alpha POI, signal split into CP-even/odd templates
-signal: DY_2Tau           #     yields = cos^2(a)*even + sin^2(a)*odd
-asimov: {enabled: true}   # rate: plain signal-strength fit (POI r)
-toy: {asymmetry: 0.0}     # nonzero injects a fake modulation; outputs stamped TOY
-systematics:
-  - {name: xsec_dy,  effect: lnN, processes: ["DY_*"], scaleFactor: 1.02}
-  - {name: norm_qcd, effect: rateParam, processes: [QCD], range: [0.1, 5]}
+model:
+  pois:
+    mu_ggH: {init: 1, range: [0, 5]}
+    mu_qqH: {init: 1, range: [0, 5]}
+    alpha:  {init: 0, range: [0, 1.5708]}
+  processes:
+    ggH:
+      components:
+        even: {weight: wt_cp_sm, scale: "mu_ggH * cos(alpha)^2"}
+        odd:  {weight: wt_cp_ps, scale: "mu_ggH * sin(alpha)^2"}
+    qqH:
+      components:
+        even: {weight: wt_cp_sm, scale: "mu_qqH * cos(alpha)^2"}
+        odd:  {weight: wt_cp_ps, scale: "mu_qqH * sin(alpha)^2"}
 ```
 
-Systematics: `lnN` takes a `scaleFactor`; `rateParam` declares a free-floating
-normalization (optional `init`/`range`), one shared parameter across all
-matching processes. Patterns match the config process names, sanitization to
-datacard names (`W+jets` → `W_jets`) is handled internally.
-
-`wham fit cp_fit` fills the discriminant histograms (signal region, QCD
-through the method set in the analysis YAML, all via the same caches as
-plotting), exports `datacard.txt` + `shapes.root` (`$CHANNEL/$PROCESS`,
-`data_obs` conventions), runs `text2workspace.py`, `FitDiagnostics` (postfit
-shapes) and a `MultiDimFit` NLL scan in the container, then renders prefit
-and postfit stacks (same colors/labels/order as datamc), a nuisance pulls
-plot (postfit parameters also land in `fitresult.json`), and the −2ΔlnL
-scan. Outputs go to `plots/<analysis>/fit/<fitname>/`.
+wham turns the model into a generated Combine `PhysicsModel` (shipped to the
+output as `whammodel.py`), fills per-category histograms through the same
+caches as plotting (QCD via the analysis `qcd.method`), exports
+`datacard.txt` + `shapes.root`, runs `text2workspace.py`, `FitDiagnostics`
+and one `MultiDimFit` per scan in the container, and renders: prefit/postfit
+stacks per category (datamc styling, split components drawn separately), a
+pulls plot with per-POI impact columns (covariance approximation; numbers in
+`fitresult.json`), and the NLL scans. Outputs go to
+`plots/<analysis>/fit/<name>/`, including the effective `fitconfig.yaml`.
 
 Every stage is keyed: editing a systematic re-exports and refits in seconds
 without touching event data; rerunning with nothing changed only re-renders.
 Flags: `--datacard-only`, `--force`, `--no-render`.
 
-Current samples have no Higgs signal and degenerate CP weights, so the physics
-`cp_fit` correctly yields a flat likelihood in α. `cp_fit_toy.yaml` (injected
-A=0.3, Asimov truth α=0.4) exercises the full measurement loop and recovers
-α = 0.400. When Higgs samples with real `wt_cp_*` weights land on EOS, point
-`signal:` at them and the same config does physics.
 
 ## Repository layout
 
@@ -241,5 +251,4 @@ cd source && python3 -m pytest wham/tests/ --override-ini "addopts=" -q   # + co
 - Systematics: histograms already carry a `variation` axis ("nominal"); reading
   variation folders other than `nominal/` is an additive change.
 - The LCG pyarrow build lacks zstd, so parquet outputs use snappy.
-- The old `htt_plotter` package was removed in June 2026; it remains in git
-  history (`git log -- source/htt_plotter`).
+

@@ -1,0 +1,98 @@
+# ============================================================================
+# wham fit config TEMPLATE — copy, rename, edit.   Run with: wham fit <name>
+# ============================================================================
+# The fitter is generic: this YAML carries the whole statistical model.
+# Outputs land in plots/<analysis>/fit/<name>/ — datacard.txt, shapes.root,
+# the generated physics model (whammodel.py), workspace, FitDiagnostics,
+# fitresult.json (postfit parameters + POI impacts), prefit/postfit stacks
+# per category, a pulls+impacts plot, and one NLL plot per scan.
+#
+# Every stage is cached: editing a systematic re-exports and refits in
+# seconds; rerunning with nothing changed only re-renders.
+# Flags: --datacard-only, --force, --no-render, --no-cache.
+
+name: my_fit                # output directory name
+analysis: mutau_2024        # analysis YAML (bare name in Configurations/, or a path)
+
+# ---------------------------------------------------------------------------
+# Categories: one entry = one datacard bin (imax N), fitted simultaneously.
+# `variable` is the observable (any entry of the analysis `variables:`);
+# `cut` (optional) is ANDed onto the analysis selection for this bin only.
+# ---------------------------------------------------------------------------
+categories:
+  - {name: mt_SR, variable: m_vis}
+  # decay-mode split example (same or different variable per bin):
+  # - {name: mu_rho, variable: aco_mu_rho, cut: "decayModePNet_2 == 1"}
+  # - {name: mu_pi,  variable: aco_mu_rho, cut: "decayModePNet_2 == 0"}
+
+# ---------------------------------------------------------------------------
+# The model: POIs + how each process's yield depends on them.
+# Processes not listed are plain backgrounds. "Signal" in the datacard sense
+# simply means "listed here" (these get process ids <= 0).
+#
+# Scale expressions may use: the POI names, numbers, + - * / ^ (or **),
+# parentheses, and cos sin tan atan sqrt exp log abs pow.
+#
+# A process is either
+#   scaled whole:        {scale: "r"}
+# or split into weighted template components, each filled with a per-event
+# weight column and scaled independently — this is how CP fits are written:
+#   components:
+#     even: {weight: wt_cp_sm, scale: "mu * cos(alpha)^2"}
+#     odd:  {weight: wt_cp_ps, scale: "mu * sin(alpha)^2"}
+# Adding e.g. an interference template later is just one more component line.
+# ---------------------------------------------------------------------------
+model:
+  pois:
+    r: {init: 1, range: [0, 3]}
+    # mu_ggH: {init: 1, range: [0, 5]}
+    # alpha:  {init: 0, range: [0, 1.5708]}      # phiCP, radians
+  processes:
+    DY_2Tau: {scale: "r"}
+    # ggH:
+    #   components:
+    #     even: {weight: wt_cp_sm, scale: "mu_ggH * cos(alpha)^2"}
+    #     odd:  {weight: wt_cp_ps, scale: "mu_ggH * sin(alpha)^2"}
+    #     # mm: {weight: wt_cp_mm, scale: "mu_ggH * 2*sin(alpha)*cos(alpha)"}
+
+# ---------------------------------------------------------------------------
+# Systematics. lnN takes a scaleFactor; rateParam is a freely floating
+# normalization (optional init + range) — the shared name makes it ONE
+# parameter across all matching processes and categories. `processes` are
+# fnmatch patterns over process names (config names like "W+jets" work; for
+# split processes the components match through their parent).
+# Optional `categories: [...]` restricts a systematic to specific bins.
+# ---------------------------------------------------------------------------
+systematics:
+  - {name: lumi_13p6TeV, effect: lnN, processes: [tt, dibosons, "W+jets", "DY_*"], scaleFactor: 1.025}
+  - {name: norm_qcd,     effect: rateParam, processes: [QCD], range: [0.1, 5]}
+  # - {name: eff_rho, effect: lnN, processes: [ggH], scaleFactor: 1.05, categories: [mu_rho]}
+
+# ---------------------------------------------------------------------------
+# Likelihood scans (MultiDimFit). One POI -> 1D profiled scan; two POIs ->
+# 2D grid rendered as 68/95% CL contours. `points` is per axis; `range`
+# overrides the POI range for 1D scans only.
+# If `scans:` is omitted entirely, every POI gets a default 1D scan.
+# ---------------------------------------------------------------------------
+scans:
+  - {pois: [r], points: 60}
+  # - {pois: [alpha], points: 60}
+  # - {pois: [alpha, mu_ggH], points: 40}
+
+# ---------------------------------------------------------------------------
+# Dataset: observed data (enabled: false) or the Asimov dataset (combine
+# -t -1). Asimov truth defaults to every POI at its init; override per POI.
+# ---------------------------------------------------------------------------
+asimov:
+  enabled: false
+  # parameters: {alpha: 0.4}
+
+# Machinery-validation knob: modulates the two templates of every
+# 2-component process by (1 ± A·cos(x)), yield-preserving. Outputs are
+# stamped TOY whenever nonzero. Leave at 0 for physics.
+toy: {asymmetry: 0.0}
+
+auto_mc_stats: 10           # per-bin MC stat nuisances (* autoMCStats N)
+
+# combine:
+#   image: /cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/cms-cloud/combine-standalone:latest

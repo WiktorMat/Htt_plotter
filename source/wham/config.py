@@ -114,6 +114,15 @@ class CPPlotCfg(_Model):
     odd: str = "wt_cp_ps"
 
 
+class ComponentFillCfg(_Model):
+    """Weighted template fills for one process in the fit signal region.
+    Set programmatically by `wham fit`, not written by hand."""
+
+    var: str
+    process: str
+    components: dict[str, str]  # component name -> weight column/expression
+
+
 class Display3DCfg(_Model):
     sample: str
     n_events: int = Field(default=1, gt=0)
@@ -167,9 +176,9 @@ class PlotsCfg(_Model):
     resolution: list[tuple[str, str]] = []  # [reco, reference] pairs
     datamc: list[str] = []
     cp: list[CPPlotCfg] = []
-    # CP hypothesis templates in the fit signal region; set programmatically
+    # weighted fit templates in the signal region; set programmatically
     # by `wham fit`, normally not written by hand.
-    fitcp: list[CPPlotCfg] = []
+    fitcp: list[ComponentFillCfg] = []
     # anti-iso QCD (data − MC) before vs after the per-event fake-factor
     # weight, with a weighted/raw ratio panel (qcd.method=ff only)
     ffcheck: list[str] = []
@@ -301,8 +310,12 @@ class AnalysisConfig(_Model):
             cols.update((self.column_of(reco), self.column_of(ref)))
         cols.update(self.column_of(v) for v in self.plots.datamc)
         cols.update(self.column_of(v) for v in self.plots.ffcheck)
-        for c in (*self.plots.cp, *self.plots.fitcp):
+        for c in self.plots.cp:
             cols.update((self.column_of(c.var), c.even, c.odd))
+        for f in self.plots.fitcp:
+            cols.add(self.column_of(f.var))
+            for weight in f.components.values():
+                cols |= parse(weight).columns
         if self.plots.display3d is not None:
             cols |= DISPLAY3D_COLUMNS
         if self.fake_factors is not None:

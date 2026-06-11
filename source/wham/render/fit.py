@@ -1,18 +1,37 @@
-"""Fit result rendering: prefit/postfit stacks and the NLL scan."""
+"""Fit result rendering: per-category prefit/postfit stacks, pulls+impacts,
+and the 1D/2D NLL scans."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import matplotlib.gridspec as gridspec
+import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 import mplhep as hep
 import numpy as np
 
-from wham.combine import FITRESULT_FILE, SHAPES_FILE, dc_name, fitdiag_file, scan_file
+from wham.combine import (
+    FITRESULT_FILE,
+    SHAPES_FILE,
+    fitdiag_file,
+    scan_file,
+    scan_tag,
+)
 from wham.config import AnalysisConfig
-from wham.fitconfig import FitConfig
-from wham.render.common import cms_label, draw_unc_band, save, var_label
+from wham.fitconfig import FitConfig, ScanCfg, dc_name
+from wham.render.common import cms_label, cms_label_split, draw_unc_band, save, var_label
+
+# colors for the 2nd, 3rd, ... component template of a process (the first
+# keeps the process color from the analysis config)
+_COMPONENT_COLORS = ("tab:pink", "tab:cyan", "tab:gray", "tab:olive")
+
+_GREEK = {"alpha", "beta", "gamma", "delta", "mu", "phi", "theta", "tau", "kappa"}
+
+
+def poi_label(poi: str) -> str:
+    return rf"$\{poi}$" if poi in _GREEK else poi
 
 
 def _tag(fit: FitConfig) -> str:
@@ -32,14 +51,18 @@ def _stamp(ax, fit: FitConfig) -> None:
 
 
 def _color_map(fit: FitConfig, cfg: AnalysisConfig) -> dict[str, tuple[str, str]]:
-    """datacard name -> (display label, color)."""
+    """datacard template name -> (display label, color)."""
     out = {}
     for proc, pcfg in cfg.processes.items():
         out[dc_name(proc)] = (pcfg.label or proc, pcfg.color)
-    sig = cfg.processes[fit.signal]
-    sig_label = sig.label or fit.signal
-    out[dc_name(f"{fit.signal}_cpeven")] = (f"{sig_label} CP-even", sig.color)
-    out[dc_name(f"{fit.signal}_cpodd")] = (f"{sig_label} CP-odd", "tab:pink")
+    for proc, pm in fit.model.processes.items():
+        if pm.components is None:
+            continue
+        base_label = cfg.processes[proc].label or proc
+        for i, comp in enumerate(pm.components):
+            color = cfg.processes[proc].color if i == 0 else _COMPONENT_COLORS[
+                (i - 1) % len(_COMPONENT_COLORS)]
+            out[dc_name(f"{proc}_{comp}")] = (f"{base_label} ({comp})", color)
     return out
 
 
@@ -47,15 +70,17 @@ def _stack_dc_order(fit: FitConfig, cfg: AnalysisConfig) -> list[str]:
     """Datacard template names in the configured stack draw order."""
     order = []
     for proc in cfg.stack_order():
-        if fit.mode == "cp" and proc == fit.signal:
-            order += [dc_name(f"{proc}_cpeven"), dc_name(f"{proc}_cpodd")]
+        pm = fit.model.processes.get(proc)
+        if pm is not None and pm.components is not None:
+            order += [dc_name(f"{proc}_{comp}") for comp in pm.components]
         else:
             order.append(dc_name(proc))
     return order
 
 
 def _render_shape_dir(fit: FitConfig, cfg: AnalysisConfig, shapes, title: str,
-                      outdir: Path, fname: str, console, edges=None) -> None:
+                      outdir: Path, fname: str, console, edges=None,
+                      xlabel: str = "") -> None:
     colors = _color_map(fit, cfg)
 
     # combine's saved shapes use unit-width bins; the real edges come from
@@ -72,22 +97,31 @@ def _render_shape_dir(fit: FitConfig, cfg: AnalysisConfig, shapes, title: str,
         return
     if edges is None:
         edges = next(iter(available.values())).axis().edges()
+    # combine pads every channel's saved shapes to the largest channel's bin
+    # count; the true bin count comes from our exported edges
+    nbins = len(edges) - 1
 
     stack_vals, stack_labels, stack_colors = [], [], []
     ordered = [n for n in _stack_dc_order(fit, cfg) if n in available]
     ordered += sorted(set(available) - set(ordered))  # anything unexpected on top
     for name in ordered:
         label, color = colors.get(name, (name, "tab:gray"))
-        stack_vals.append(available[name].values())
+        stack_vals.append(available[name].values()[:nbins])
         stack_labels.append(label)
         stack_colors.append(color)
 
     total = shapes["total"]
-    total_vals = total.values()
-    total_unc = np.sqrt(np.maximum(total.variances(), 0.0))
-    data = shapes["data"]  # TGraphAsymmErrors
-    data_y = data.values(axis="y")
+    total_vals = total.values()[:nbins]
+    total_unc = np.sqrt(np.maximum(total.variances()[:nbins], 0.0))
     centers = 0.5 * (edges[:-1] + edges[1:])
+    # the data graph has one point per populated bin, at x = bin index + 0.5
+    data = shapes["data"]  # TGraphAsymmErrors
+    gx = data.values(axis="x")
+    gy = data.values(axis="y")
+    data_y = np.zeros(nbins)
+    idx = np.floor(gx).astype(int)
+    keep = (idx >= 0) & (idx < nbins)
+    data_y[idx[keep]] = gy[keep]
     data_unc = np.sqrt(np.maximum(data_y, 0.0))
 
     fig = plt.figure(figsize=(10, 10))
@@ -125,61 +159,179 @@ def _render_shape_dir(fit: FitConfig, cfg: AnalysisConfig, shapes, title: str,
                  color="black", markersize=5)
     rax.set_ylim(0.5, 1.5)
     rax.set_ylabel("Data / Fit")
-    rax.set_xlabel(var_label(cfg, fit.variable))
+    rax.set_xlabel(xlabel)
 
     save(fig, outdir, fname, console)
 
 
-def _render_pulls(fit: FitConfig, cfg: AnalysisConfig, fitdir: Path, console) -> None:
-    import json
+# ------------------------------------------------------------- pulls/impacts
 
+
+def _render_pulls(fit: FitConfig, cfg: AnalysisConfig, fitdir: Path, console) -> None:
     path = fitdir / FITRESULT_FILE
     if not path.is_file():
         return
-    params = json.loads(path.read_text(encoding="utf-8"))
+    result = json.loads(path.read_text(encoding="utf-8"))
+    params = result.get("params", {})
+    impacts = result.get("impacts", {})
 
-    # free parameters (POI + rateParams) are reported as values, not pulls;
-    # prop_bin* (autoMCStats) would swamp the plot
-    free_names = [fit.poi()] + [s.name for s in fit.systematics if s.effect == "rateParam"]
-    free = [(n, params[n]) for n in free_names if n in params]
-    pulls = sorted(
-        (n, p) for n, p in params.items()
-        if n not in free_names and not n.startswith("prop_bin")
-    )
-    if not pulls and not free:
+    pois = [p for p in fit.model.pois if p in params]
+    rate_params = [s.name for s in fit.systematics
+                   if s.effect == "rateParam" and s.name in params]
+    free = pois + rate_params
+    constrained = [n for n in params
+                   if n not in free and not n.startswith("prop_bin")]
+
+    def importance(name: str) -> float:
+        vals = [abs(impacts.get(p, {}).get(name, 0.0)) for p in pois]
+        return max(vals) if vals else abs(params[name]["value"])
+
+    # rateParams get impact bars but no pull (they are unconstrained)
+    rows = sorted(constrained + rate_params, key=importance)  # largest on top
+    if not rows and not free:
         return
 
-    fig, ax = plt.subplots(figsize=(10, max(4.5, 0.6 * len(pulls) + 3.0)))
-    ax.axvspan(-2, 2, color="gold", alpha=0.35, zorder=0)
-    ax.axvspan(-1, 1, color="yellowgreen", alpha=0.45, zorder=1)
-    ax.axvline(0, color="gray", linewidth=1, zorder=2)
+    n_imp = len(pois)
+    head = 0.75 * len(free) + 0.8  # data-units of headroom for the summary
+    fig_h = max(4.5, 1.8 + 0.55 * len(rows) + 0.45 * len(free))
+    fig = plt.figure(figsize=(11, fig_h))
+    gs = gridspec.GridSpec(1, 1 + n_imp, width_ratios=[2.2] + [1.0] * n_imp,
+                           wspace=0.07)
+    axp = fig.add_subplot(gs[0])
+    iaxes = [fig.add_subplot(gs[i + 1], sharey=axp) for i in range(n_imp)]
 
-    y = np.arange(len(pulls))
-    if pulls:
-        values = np.array([p["value"] for _, p in pulls])
-        errors = np.array([p["error"] for _, p in pulls])
-        ax.errorbar(values, y, xerr=errors, fmt="o", color="black",
-                    markersize=6, zorder=5)
-        ax.set_xlim(-max(2.5, float(np.max(np.abs(values) + errors)) + 0.5),
-                    max(2.5, float(np.max(np.abs(values) + errors)) + 0.5))
-    else:
-        ax.set_xlim(-2.5, 2.5)
-    ax.set_yticks(y, [n for n, _ in pulls])
-    # headroom above the nuisances for the free-parameter summary
-    ax.set_ylim(-0.7, len(pulls) + max(1.5, 0.8 * len(free)))
-    ax.set_xlabel(r"$(\hat{\theta} - \theta_0) / \Delta\theta$")
+    y = np.arange(len(rows))
+    axp.axvspan(-2, 2, color="gold", alpha=0.35, zorder=0)
+    axp.axvspan(-1, 1, color="yellowgreen", alpha=0.45, zorder=1)
+    axp.axvline(0, color="gray", linewidth=1, zorder=2)
+    for yy in y[:-1]:
+        axp.axhline(yy + 0.5, color="gray", linewidth=0.4, alpha=0.4, zorder=0)
 
+    pull_rows = [(i, params[n]) for i, n in enumerate(rows) if n not in rate_params]
+    if pull_rows:
+        axp.errorbar([p["value"] for _, p in pull_rows], [i for i, _ in pull_rows],
+                     xerr=[p["error"] for _, p in pull_rows],
+                     fmt="o", color="black", markersize=6, zorder=5)
+    lim = 2.5
+    if pull_rows:
+        lim = max(lim, max(abs(p["value"]) + p["error"] for _, p in pull_rows) + 0.4)
+    axp.set_xlim(-lim, lim)
+    axp.set_yticks(y, rows, fontsize=13)
+    axp.set_ylim(-0.6, max(len(rows) - 0.4, 0.4) + head)
+    axp.set_xlabel(r"$(\hat{\theta} - \theta_0) / \Delta\theta$", fontsize=15)
+    axp.tick_params(labelsize=13)
+
+    # free-parameter summary (POIs + rateParams), top left
     if free:
-        labels = {n: n.replace("_", r"\_") for n, _ in free}
-        text = "\n".join(
-            rf"${labels[n]} = {p['value']:.3f} \pm {p['error']:.3f}$" for n, p in free
-        )
-        ax.text(0.03, 0.97, text, transform=ax.transAxes, ha="left", va="top",
-                fontsize=15)
+        lines = []
+        for name in free:
+            p = params[name]
+            label = name.replace("_", r"\_")
+            lines.append(rf"${label} = {p['value']:.3f} \pm {p['error']:.3f}$")
+        axp.text(0.03, 0.985, "\n".join(lines), transform=axp.transAxes,
+                 ha="left", va="top", fontsize=14)
 
+    for iax, poi in zip(iaxes, pois):
+        vals = np.array([impacts.get(poi, {}).get(n, 0.0) for n in rows])
+        iax.barh(y, vals, height=0.55, color="tab:blue", alpha=0.8)
+        iax.axvline(0, color="gray", linewidth=1)
+        for yy in y[:-1]:
+            iax.axhline(yy + 0.5, color="gray", linewidth=0.4, alpha=0.4, zorder=0)
+        span = float(np.max(np.abs(vals))) if len(vals) and np.max(np.abs(vals)) > 0 else 1.0
+        iax.set_xlim(-1.4 * span, 1.4 * span)
+        iax.set_ylim(*axp.get_ylim())
+        iax.set_xlabel(rf"$\Delta$ {poi_label(poi)}", fontsize=15)
+        iax.tick_params(labelleft=False, labelsize=11)
+        iax.xaxis.get_offset_text().set_fontsize(10)
+
+    cms_label_split(axp, iaxes[-1] if iaxes else axp, cfg)
+    _stamp(iaxes[0] if iaxes else axp, fit)
+    save(fig, fitdir, "pulls", console)
+
+
+# ------------------------------------------------------------- scans
+
+
+def _scan_arrays(fitdir: Path, fit: FitConfig, scan: ScanCfg, branches: list[str]):
+    import uproot
+
+    path = fitdir / scan_file(fit, scan)
+    if not path.is_file():
+        return None
+    with uproot.open(path) as f:
+        tree = f["limit"]
+        return {b: tree[b].array(library="np") for b in [*branches, "deltaNLL"]}
+
+
+def _render_scan_1d(fit: FitConfig, cfg: AnalysisConfig, fitdir: Path,
+                    scan: ScanCfg, console) -> None:
+    poi = scan.pois[0]
+    arrays = _scan_arrays(fitdir, fit, scan, [poi])
+    if arrays is None:
+        return
+    vals, dnll = arrays[poi], arrays["deltaNLL"]
+
+    grid = dnll > 0  # first entry is the best fit (deltaNLL == 0)
+    order = np.argsort(vals[grid])
+    x, y = vals[grid][order], 2 * dnll[grid][order]
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.plot(x, y, "-o", color="tab:blue", markersize=4)
+    for level, label in ((1.0, r"68% CL"), (3.84, r"95% CL")):
+        ax.axhline(level, linestyle="--", color="gray", linewidth=1)
+        ax.text(x[-1], level * 1.02, label, ha="right", fontsize=12, color="gray")
+    best = float(vals[~grid][0]) if np.any(~grid) else float(x[np.argmin(y)])
+    ax.axvline(best, linestyle=":", color="tab:red", linewidth=1)
+
+    ax.set_xlabel(poi_label(poi))
+    ax.set_ylabel(r"$-2\,\Delta\,\mathrm{ln}\,L$")
+    ax.set_ylim(bottom=0)
+    ax.text(0.03, 0.97, f"best fit {poi} = {best:.3f}",
+            transform=ax.transAxes, ha="left", va="top", fontsize=14)
     cms_label(ax, cfg)
     _stamp(ax, fit)
-    save(fig, fitdir, "pulls", console)
+    save(fig, fitdir, f"nll_scan_{scan_tag(scan)}", console)
+
+
+def _render_scan_2d(fit: FitConfig, cfg: AnalysisConfig, fitdir: Path,
+                    scan: ScanCfg, console) -> None:
+    p1, p2 = scan.pois
+    arrays = _scan_arrays(fitdir, fit, scan, [p1, p2])
+    if arrays is None:
+        return
+    x, y, dnll = arrays[p1], arrays[p2], arrays["deltaNLL"]
+
+    grid = dnll > 0
+    finite = grid & np.isfinite(dnll)
+    if finite.sum() < 4:
+        if console is not None:
+            console.print(f"  [yellow]2D scan {scan_tag(scan)}: too few points — skipped[/yellow]")
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 9))
+    # 68% / 95% CL for 2 parameters: 2*deltaNLL = 2.30 / 5.99
+    ax.tricontour(x[finite], y[finite], 2 * dnll[finite],
+                  levels=[2.30, 5.99], colors=["tab:blue", "tab:red"],
+                  linewidths=2)
+    handles = [
+        mlines.Line2D([], [], color="tab:blue", linewidth=2, label="68% CL"),
+        mlines.Line2D([], [], color="tab:red", linewidth=2, label="95% CL"),
+    ]
+    if np.any(~grid):
+        bx, by = float(x[~grid][0]), float(y[~grid][0])
+        ax.plot(bx, by, "*", color="black", markersize=16, zorder=5)
+        handles.append(mlines.Line2D([], [], color="black", marker="*", linestyle="",
+                                     markersize=12, label="Best fit"))
+
+    ax.set_xlabel(poi_label(p1))
+    ax.set_ylabel(poi_label(p2))
+    ax.legend(handles=handles, fontsize=14, loc="upper left")
+    cms_label(ax, cfg)
+    _stamp(ax, fit)
+    save(fig, fitdir, f"nll_scan_{scan_tag(scan)}", console)
+
+
+# ------------------------------------------------------------- driver
 
 
 def render_fit(fit: FitConfig, cfg: AnalysisConfig, fitdir: Path, console=None) -> None:
@@ -188,57 +340,45 @@ def render_fit(fit: FitConfig, cfg: AnalysisConfig, fitdir: Path, console=None) 
     from wham.render.common import set_style
 
     set_style()
+    multi = len(fit.categories) > 1
 
-    # ---- prefit / postfit stacks
-    # combine saves shapes with unit-width bins; recover the variable's real
-    # edges from the exported shapes.root
-    edges = None
+    # combine saves shapes with unit-width bins; recover the real edges per
+    # category from the exported shapes.root
+    edges: dict[str, np.ndarray] = {}
     shapes_path = fitdir / SHAPES_FILE
     if shapes_path.is_file():
         with uproot.open(shapes_path) as sf:
-            edges = sf[f"{fit.bin}/data_obs"].axis().edges()
+            for cat in fit.categories:
+                key = f"{cat.name}/data_obs"
+                if key in sf:
+                    edges[cat.name] = sf[key].axis().edges()
 
+    # ---- prefit / postfit stacks, one per category
     fd_path = fitdir / fitdiag_file(fit)
     if fd_path.is_file():
         with uproot.open(fd_path) as fd:
-            for dirname, label, fname in (
-                ("shapes_prefit", "Prefit", "prefit"),
-                ("shapes_fit_s", "Postfit (s+b)", "postfit"),
-            ):
-                key = f"{dirname}/{fit.bin}"
-                if key in fd:
-                    _render_shape_dir(fit, cfg, fd[key], label, fitdir, fname,
-                                      console, edges=edges)
+            for cat in fit.categories:
+                for dirname, label, fname in (
+                    ("shapes_prefit", "Prefit", "prefit"),
+                    ("shapes_fit_s", "Postfit (s+b)", "postfit"),
+                ):
+                    key = f"{dirname}/{cat.name}"
+                    if key not in fd:
+                        continue
+                    _render_shape_dir(
+                        fit, cfg, fd[key],
+                        f"{label} — {cat.name}" if multi else label,
+                        fitdir, f"{fname}_{cat.name}" if multi else fname,
+                        console, edges=edges.get(cat.name),
+                        xlabel=var_label(cfg, cat.variable),
+                    )
 
-    # ---- nuisance pulls / free-parameter summary
+    # ---- nuisance pulls + POI impacts
     _render_pulls(fit, cfg, fitdir, console)
 
-    # ---- NLL scan
-    scan_path = fitdir / scan_file(fit)
-    if scan_path.is_file():
-        with uproot.open(scan_path) as f:
-            tree = f["limit"]
-            poi = tree[fit.poi()].array(library="np")
-            dnll = tree["deltaNLL"].array(library="np")
-
-        grid = dnll > 0  # first entry is the best fit (deltaNLL == 0)
-        order = np.argsort(poi[grid])
-        x, y = poi[grid][order], 2 * dnll[grid][order]
-
-        fig, ax = plt.subplots(figsize=(10, 8))
-        ax.plot(x, y, "-o", color="tab:blue", markersize=4)
-        for level, label in ((1.0, r"68% CL"), (3.84, r"95% CL")):
-            ax.axhline(level, linestyle="--", color="gray", linewidth=1)
-            ax.text(x[-1], level * 1.02, label, ha="right", fontsize=12, color="gray")
-        best = float(poi[~grid][0]) if np.any(~grid) else float(x[np.argmin(y)])
-        ax.axvline(best, linestyle=":", color="tab:red", linewidth=1)
-
-        xlabel = r"$\alpha$ [rad]" if fit.poi() == "alpha" else r"$r$"
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(r"$-2\,\Delta\,\mathrm{ln}\,L$")
-        ax.set_ylim(bottom=0)
-        ax.text(0.03, 0.97, f"best fit {fit.poi()} = {best:.3f}",
-                transform=ax.transAxes, ha="left", va="top", fontsize=14)
-        cms_label(ax, cfg)
-        _stamp(ax, fit)
-        save(fig, fitdir, "nll_scan", console)
+    # ---- NLL scans
+    for scan in fit.resolved_scans():
+        if len(scan.pois) == 1:
+            _render_scan_1d(fit, cfg, fitdir, scan, console)
+        else:
+            _render_scan_2d(fit, cfg, fitdir, scan, console)

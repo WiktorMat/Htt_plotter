@@ -97,11 +97,14 @@ def test_cp_even_odd_weights(filled: dict) -> None:
 
 
 def test_fitcp_signal_region_templates(workspace: dict) -> None:
-    from wham.config import CPPlotCfg
+    from wham.config import ComponentFillCfg
 
     cfg = load_config(workspace["yaml"])
     plots = cfg.plots.model_copy(
-        update={"fitcp": [CPPlotCfg(var="met_phi", even="wt_cp_sm", odd="wt_cp_ps")]}
+        update={"fitcp": [ComponentFillCfg(
+            var="met_phi", process="TT",
+            components={"even": "wt_cp_sm", "odd": "wt_cp_ps"},
+        )]}
     )
     cfg = cfg.model_copy(update={"plots": plots})
     samples, _ = discover_samples(cfg)
@@ -113,6 +116,7 @@ def test_fitcp_signal_region_templates(workspace: dict) -> None:
         merge_hists(hists, fill_sample(s, skims[s.name], spec))
 
     h = hists[("fitcp", "met_phi")]
+    assert sorted(h.axes["region"]) == ["even", "odd"]
     sample = next(s for s in samples if s.name == "TT_test")
     df = _reference_frame(sample, cfg)
     # SR = trigger & os & iso (abcd) on top of base selection
@@ -124,8 +128,8 @@ def test_fitcp_signal_region_templates(workspace: dict) -> None:
             h[{"process": "TT", "region": region, "variation": "nominal"}].view()["value"].sum()
         )
         assert got == pytest.approx(expected, rel=1e-9), region
-    # data and QCD slots stay empty
-    for proc in ("data", "QCD"):
+    # the fills are per-process: only TT was requested; data/QCD stay empty too
+    for proc in ("DY", "data", "QCD"):
         assert float(
             h[{"process": proc, "region": "even", "variation": "nominal"}].view()["value"].sum()
         ) == 0.0
@@ -165,13 +169,16 @@ def test_ffcheck_raw_vs_weighted(workspace: dict) -> None:
 
 
 def test_fitcp_cache_key_includes_weight_columns(workspace: dict) -> None:
-    from wham.config import CPPlotCfg
+    from wham.config import ComponentFillCfg
     from wham.fill import spec_extras
     from wham.histcache import cache_key
 
     cfg = load_config(workspace["yaml"])
     plots = cfg.plots.model_copy(
-        update={"fitcp": [CPPlotCfg(var="met_phi", even="wt_cp_sm", odd="wt_cp_ps")]}
+        update={"fitcp": [ComponentFillCfg(
+            var="met_phi", process="TT",
+            components={"even": "wt_cp_sm", "odd": "wt_cp_ps"},
+        )]}
     )
     cfg = cfg.model_copy(update={"plots": plots})
     samples, _ = discover_samples(cfg)
@@ -183,7 +190,7 @@ def test_fitcp_cache_key_includes_weight_columns(workspace: dict) -> None:
     k1 = cache_key(cfg, samples, skims, spec, "fitcp", "met_phi", vcfg,
                    extra=extras[("fitcp", "met_phi")])
     k2 = cache_key(cfg, samples, skims, spec, "fitcp", "met_phi", vcfg,
-                   extra={"even": "other_col", "odd": "wt_cp_ps"})
+                   extra={"components": {"TT": {"even": "other_col", "odd": "wt_cp_ps"}}})
     assert k1 != k2
     # no extra -> matches legacy keying (datamc etc. unaffected)
     k3 = cache_key(cfg, samples, skims, spec, "datamc", "met_phi", vcfg)

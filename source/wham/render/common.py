@@ -25,11 +25,26 @@ def set_style() -> None:
         _style_set = True
 
 
-def cms_label(ax, cfg: AnalysisConfig) -> None:
+def _rlabel(cfg: AnalysisConfig) -> str:
     rlabel = f"{round(cfg.lumi / 1000.0, 1)} fb$^{{-1}}$ ({cfg.style.com:g} TeV)"
     if cfg.style.era:
         rlabel = f"{cfg.style.era}, {rlabel}"
-    hep.cms.label(cfg.style.cms_label, data=True, rlabel=rlabel, ax=ax)
+    return rlabel
+
+
+def cms_label(ax, cfg: AnalysisConfig) -> None:
+    hep.cms.label(cfg.style.cms_label, data=True, rlabel=_rlabel(cfg), ax=ax)
+
+
+def cms_label_split(ax_left, ax_right, cfg: AnalysisConfig) -> None:
+    """CMS text over ax_left, lumi over ax_right — for multi-axis figures
+    where one axis is too narrow to hold both."""
+    if ax_right is ax_left:
+        cms_label(ax_left, cfg)
+        return
+    hep.cms.label(cfg.style.cms_label, data=True, rlabel="", ax=ax_left)
+    ax_right.text(1.0, 1.013, _rlabel(cfg), transform=ax_right.transAxes,
+                  ha="right", va="bottom", fontsize=17)
 
 
 def save(fig, outdir: Path, name: str, console=None) -> None:

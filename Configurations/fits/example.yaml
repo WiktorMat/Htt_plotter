@@ -1,0 +1,35 @@
+# wham fit config — the one runnable example (see TEMPLATE.yaml for every
+# option). Z->tau_mu tau_h signal strength on the visible mass, observed
+# 2024 data, free-floating QCD normalization.
+# Run with:  wham fit example
+
+name: example
+analysis: mutau_2024
+
+categories:
+  - {name: mt_SR, variable: m_vis}
+
+model:
+  pois:
+    r: {init: 1, range: [0, 3]}
+  processes:
+    DY_2Tau: {scale: "r"}
+
+systematics:
+  # lumi on simulated processes only — QCD is data-driven
+  - {name: lumi_13p6TeV, effect: lnN, processes: [tt, dibosons, "W+jets", "DY_*"], scaleFactor: 1.025}
+  - {name: xsec_tt,      effect: lnN, processes: [tt],       scaleFactor: 1.05}
+  - {name: xsec_vv,      effect: lnN, processes: [dibosons], scaleFactor: 1.06}
+  - {name: xsec_w,       effect: lnN, processes: ["W+jets"], scaleFactor: 1.05}
+  # xsec_dy only on the mu->tau_h fake component; the signal rate is the POI
+  - {name: xsec_dy,      effect: lnN, processes: [DY_2Mu],   scaleFactor: 1.02}
+  # free-floating QCD normalization (one shared parameter)
+  - {name: norm_qcd,     effect: rateParam, processes: [QCD], range: [0.1, 5]}
+
+scans:
+  - {pois: [r], points: 60, range: [0.8, 1.2]}
+
+asimov:
+  enabled: false            # fit the observed data
+
+auto_mc_stats: 10

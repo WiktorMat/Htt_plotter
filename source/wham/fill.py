@@ -33,6 +33,8 @@ def resolution_name(reco: str, ref: str) -> str:
 
 
 def regions_for(family: str, qcd_method: str) -> tuple[str, ...]:
+    # NB: "fitcp" regions are the configured component names; make_hist
+    # derives them from the spec instead of calling this.
     if family == "datamc":
         if qcd_method == "abcd":
             return REGIONS_ABCD
@@ -41,7 +43,7 @@ def regions_for(family: str, qcd_method: str) -> tuple[str, ...]:
         return REGIONS_SS
     if family == "ffcheck":
         return REGIONS_FFCHECK
-    if family in ("cp", "fitcp"):
+    if family == "cp":
         return REGIONS_CP
     return (REGION_NOMINAL,)
 
@@ -64,8 +66,9 @@ class FillSpec:
     resolution: tuple[tuple[str, str, dict, dict], ...]  # (reco, ref, rescfg, refcfg)
     datamc: tuple[tuple[str, dict], ...]
     cp: tuple[tuple[str, str, str, dict], ...]       # (var, even_col, odd_col, varcfg)
-    # like cp but with signal-region cuts (trigger & os & iso), for fitting
-    fitcp: tuple[tuple[str, str, str, dict], ...] = ()
+    # weighted fit templates with signal-region cuts (trigger & os & iso):
+    # (var, process, ((component, weight_expr), ...), varcfg)
+    fitcp: tuple[tuple[str, str, tuple[tuple[str, str], ...], dict], ...] = ()
     # anti-iso fills with and without the FF weight (qcd.method=ff only)
     ffcheck: tuple[tuple[str, dict], ...] = ()
     # variables whose source column differs from their name (alias -> column)
@@ -86,9 +89,16 @@ def _axis(var: str, vcfg: dict):
 def make_hist(spec: FillSpec, family: str, var: str, vcfg: dict):
     import hist
 
+    if family == "fitcp":
+        # region axis = the configured component names (sorted union so every
+        # worker builds identical axes and partial hists merge with +)
+        regions = sorted({c for v, _, comps, _ in spec.fitcp for c, _ in comps
+                          if v == var})
+    else:
+        regions = list(regions_for(family, spec.qcd_method))
     return hist.Hist(
         hist.axis.StrCategory(list(spec.processes), name="process"),
-        hist.axis.StrCategory(list(regions_for(family, spec.qcd_method)), name="region"),
+        hist.axis.StrCategory(regions, name="region"),
         hist.axis.StrCategory(["nominal"], name="variation"),
         _axis(var, vcfg),
         storage=hist.storage.Weight(),
@@ -143,7 +153,7 @@ def build_fill_spec(
         if "cp" in families and want(c.var)
     )
     fitcp = tuple(
-        (c.var, c.even, c.odd, vdump(c.var))
+        (c.var, c.process, tuple(sorted(c.components.items())), vdump(c.var))
         for c in cfg.plots.fitcp
         if "fitcp" in families and want(c.var)
     )
@@ -182,7 +192,12 @@ def hist_keys(spec: FillSpec) -> list[tuple[str, str, dict]]:
     ]
     out += [("datamc", v, vcfg) for v, vcfg in spec.datamc]
     out += [("cp", v, vcfg) for v, _, _, vcfg in spec.cp]
-    out += [("fitcp", v, vcfg) for v, _, _, vcfg in spec.fitcp]
+    # several processes may share a fitcp variable -> one hist
+    seen: set[str] = set()
+    for v, _, _, vcfg in spec.fitcp:
+        if v not in seen:
+            seen.add(v)
+            out.append(("fitcp", v, vcfg))
     out += [("ffcheck", v, vcfg) for v, vcfg in spec.ffcheck]
     return out
 
@@ -192,8 +207,9 @@ def spec_extras(spec: FillSpec) -> dict[HistKey, dict]:
     extras: dict[HistKey, dict] = {}
     for var, even_col, odd_col, _ in spec.cp:
         extras[("cp", var)] = {"even": even_col, "odd": odd_col}
-    for var, even_col, odd_col, _ in spec.fitcp:
-        extras[("fitcp", var)] = {"even": even_col, "odd": odd_col}
+    for var, process, comps, _ in spec.fitcp:
+        key = ("fitcp", var)
+        extras.setdefault(key, {"components": {}})["components"][process] = dict(comps)
     colmap = dict(spec.var_columns)
     for reco, ref, _, _ in spec.resolution:
         rc, fc = colmap.get(reco, reco), colmap.get(ref, ref)
@@ -397,18 +413,23 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
             fill("cp", var, vcfg, "even", values, finite, weights * cols.get(even_col))
             fill("cp", var, vcfg, "odd", values, finite, weights * cols.get(odd_col))
 
-    # ---- fitcp: CP hypothesis templates in the signal region (MC only)
+    # ---- fitcp: weighted fit templates in the signal region, per process
     if spec.fitcp and sample.kind != "data":
         sr = sr_mask()
         if sr is not None:
-            for var, even_col, odd_col, vcfg in spec.fitcp:
+            for var, process, comps, vcfg in spec.fitcp:
+                if process != sample.process:
+                    continue
                 col = column(var)
-                if col not in cols or even_col not in cols or odd_col not in cols:
+                if col not in cols:
                     continue
                 values = cols.get(col)
                 mask = sr & cols.finite(col)
-                fill("fitcp", var, vcfg, "even", values, mask, weights * cols.get(even_col))
-                fill("fitcp", var, vcfg, "odd", values, mask, weights * cols.get(odd_col))
+                for comp, weight_expr in comps:
+                    if not parse(weight_expr).columns <= cols.names:
+                        continue
+                    fill("fitcp", var, vcfg, comp, values, mask,
+                         weights * cols.eval(weight_expr).astype(float))
 
     return hists
 
@@ -434,6 +455,7 @@ def fill_all(
     workers: int = 6,
     use_cache: bool = True,
     cache_only: bool = False,
+    sidecars: bool = True,
     console=None,
 ) -> dict[HistKey, Any]:
     """Return all requested histograms, filling only what the cache lacks."""
@@ -492,7 +514,8 @@ def fill_all(
             save_hist(cfg.name, family, name, _key(family, name, vcfg), h)
             hists[(family, name)] = h
 
-        write_sidecars(cfg, hists)
+        if sidecars:
+            write_sidecars(cfg, hists)
 
     return hists
 
