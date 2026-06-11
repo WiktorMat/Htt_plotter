@@ -14,7 +14,7 @@ from wham.fill import (
 )
 from wham.skim import ensure_skims
 
-FAMILIES = ["control", "resolution", "datamc", "cp"]
+FAMILIES = ["resolution", "datamc", "cp"]
 
 
 @pytest.fixture
@@ -39,31 +39,6 @@ def _reference_frame(sample, cfg):
     scale = sample_scale(sample, cfg.lumi)
     df["w"] = 1.0 if sample.kind == "data" else df.weight * scale
     return df
-
-
-def test_control_yields_match_reference(filled: dict) -> None:
-    cfg = filled["cfg"]
-    h = filled["hists"][("control", "pt_1")]
-    for sample in filled["samples"]:
-        df = _reference_frame(sample, cfg)
-        in_range = (df.pt_1 >= 0) & (df.pt_1 < 100)
-        expected = df.w[in_range].sum()
-        view = h[{"process": sample.process, "region": "nominal", "variation": "nominal"}]
-        got = float(view.view()["value"].sum())
-        assert got == pytest.approx(expected, rel=1e-9), sample.name
-
-
-def test_control_sumw2_matches_reference(filled: dict) -> None:
-    cfg = filled["cfg"]
-    h = filled["hists"][("control", "pt_1")]
-    sample = next(s for s in filled["samples"] if s.name == "TT_test")
-    df = _reference_frame(sample, cfg)
-    in_range = (df.pt_1 >= 0) & (df.pt_1 < 100)
-    expected = (df.w[in_range] ** 2).sum()
-    got = float(
-        h[{"process": "TT", "region": "nominal", "variation": "nominal"}].view()["variance"].sum()
-    )
-    assert got == pytest.approx(expected, rel=1e-9)
 
 
 def test_datamc_regions_partition(filled: dict) -> None:
@@ -192,7 +167,7 @@ def test_fill_all_uses_cache(workspace: dict) -> None:
     # second call must come purely from cache (cache_only raises otherwise)
     h2 = fill_all(cfg, samples, skims, families=FAMILIES, workers=1,
                   use_cache=True, cache_only=True)
-    k = ("control", "pt_1")
+    k = ("datamc", "pt_1")
     assert np.allclose(h1[k].view()["value"], h2[k].view()["value"])
 
 
@@ -205,13 +180,13 @@ def test_cache_key_sensitivity(workspace: dict) -> None:
     spec = build_fill_spec(cfg, families=FAMILIES)
     vcfg = cfg.variables["pt_1"].model_dump()
 
-    base = cache_key(cfg, samples, skims, spec, "control", "pt_1", vcfg)
+    base = cache_key(cfg, samples, skims, spec, "datamc", "pt_1", vcfg)
 
     cut = cfg.model_copy(update={"selection": "pt_1 > 30"})
-    assert cache_key(cut, samples, skims, spec, "control", "pt_1", vcfg) != base
+    assert cache_key(cut, samples, skims, spec, "datamc", "pt_1", vcfg) != base
 
     relabeled = dict(vcfg, label="something new")
-    assert cache_key(cfg, samples, skims, spec, "control", "pt_1", relabeled) == base
+    assert cache_key(cfg, samples, skims, spec, "datamc", "pt_1", relabeled) == base
 
     rebinned = dict(vcfg, bins=99)
-    assert cache_key(cfg, samples, skims, spec, "control", "pt_1", rebinned) != base
+    assert cache_key(cfg, samples, skims, spec, "datamc", "pt_1", rebinned) != base

@@ -44,14 +44,14 @@ then `python3 -m wham.cli ...`.
   against sample directories in `data_dir`.
 - Per-sample `xs`/`eff` are read from `params.yaml` next to the analysis YAML
   (or inline under `sample_params`). MC scale = `lumi * xs * filter_efficiency / eff`.
-- `plots`: families `control`, `resolution` ([reco, ref] pairs), `datamc`,
+- `plots`: families `resolution` ([reco, ref] pairs), `datamc`,
   `cp` (CP-even vs CP-odd weights), `display3d`.
 - Resolution binning: define a variable named `<reco>_from_<ref>` to control it,
   otherwise a sensible default is used ((reco−ref)/ref in [−2, 2]).
 
 QCD estimation: `method: ss` (SS→OS with `ff`) or `method: abcd`
 (per-bin transfer factor from anti-isolated regions), matching the old plotter
-bin-by-bin (verified with `scripts/compare_parity.py`).
+bin-by-bin (verified against it before its removal).
 
 ## Tests
 

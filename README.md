@@ -3,11 +3,10 @@
 Plotting and fitting framework for the H→ττ (μτ<sub>h</sub>) analysis, Run 3 2024.
 WHAM = Wiktor, Hagop, Artur, Michal.
 
-The package lives in `source/wham/`. It produces five plot families:
+The package lives in `source/wham/`. It produces four plot families:
 
 | family | output |
 |---|---|
-| `control`    | stacked MC + data points for single variables |
 | `datamc`     | Data/MC ratio panels with data-driven QCD (SS or ABCD) and stat. uncertainty bands |
 | `resolution` | (reco − ref)/ref distributions for variable pairs |
 | `cp`         | CP-even vs CP-odd weighted distributions + integrated asymmetry |

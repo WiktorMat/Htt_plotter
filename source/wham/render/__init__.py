@@ -20,10 +20,6 @@ def render_families(
     set_style()
     outdir = Path(outdir)
 
-    if "control" in families:
-        from wham.render.control import render_control
-
-        render_control(cfg, hists, outdir, only_vars, console)
     if "datamc" in families:
         from wham.render.datamc import render_datamc
 

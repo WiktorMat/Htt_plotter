@@ -34,7 +34,7 @@ def test_required_columns(workspace: dict) -> None:
     [
         ("selection: 'pt_1 >'", "invalid expression in 'selection'"),
         ("selection: 'sin(pt_1) > 1'", "only abs"),
-        ("plots:\n  control: [nonexistent_var]", "not defined in 'variables'"),
+        ("plots:\n  datamc: [nonexistent_var]", "not defined in 'variables'"),
         ("lumi: -5", "greater than 0"),
         ("typo_field: 1", "extra"),
     ],

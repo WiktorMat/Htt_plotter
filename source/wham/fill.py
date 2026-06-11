@@ -52,7 +52,6 @@ class FillSpec:
     lumi: float
     processes: tuple[str, ...]            # category axis content, fixed order
     # requested fills
-    control: tuple[tuple[str, dict], ...]            # (var, varcfg dict)
     resolution: tuple[tuple[str, str, dict, dict], ...]  # (reco, ref, rescfg, refcfg)
     datamc: tuple[tuple[str, dict], ...]
     cp: tuple[tuple[str, str, str, dict], ...]       # (var, even_col, odd_col, varcfg)
@@ -113,9 +112,6 @@ def build_fill_spec(
     def vdump(var: str) -> dict:
         return cfg.variables[var].model_dump()
 
-    control = tuple(
-        (v, vdump(v)) for v in cfg.plots.control if "control" in families and want(v)
-    )
     resolution = tuple(
         (reco, ref, resolution_binning(cfg, reco, ref), vdump(ref))
         for reco, ref in cfg.plots.resolution
@@ -145,7 +141,6 @@ def build_fill_spec(
         qcd_antiiso=cfg.qcd.antiiso,
         lumi=cfg.lumi,
         processes=tuple(cfg.processes.keys()),
-        control=control,
         resolution=resolution,
         datamc=datamc,
         cp=cp,
@@ -156,7 +151,6 @@ def build_fill_spec(
 def hist_keys(spec: FillSpec) -> list[tuple[str, str, dict]]:
     """(family, name, binning) for every histogram the spec defines."""
     out: list[tuple[str, str, dict]] = []
-    out += [("control", v, vcfg) for v, vcfg in spec.control]
     out += [
         ("resolution", resolution_name(reco, ref), rescfg)
         for reco, ref, rescfg, _ in spec.resolution
@@ -243,13 +237,6 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
             **{name: values[mask]},
             weight=w[mask],
         )
-
-    # ---- control: base selection only, weighted
-    for var, vcfg in spec.control:
-        if var not in cols:
-            continue
-        mask = cols.finite(var)
-        fill("control", var, vcfg, REGION_NOMINAL, cols.get(var), mask, weights)
 
     # ---- resolution: derived variable
     for reco, ref, rescfg, refcfg in spec.resolution:
@@ -446,7 +433,6 @@ def _restrict_spec(spec: FillSpec, keys: set[HistKey]) -> FillSpec:
 
     return replace(
         spec,
-        control=tuple(x for x in spec.control if ("control", x[0]) in keys),
         resolution=tuple(
             x for x in spec.resolution
             if ("resolution", resolution_name(x[0], x[1])) in keys

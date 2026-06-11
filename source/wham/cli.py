@@ -67,8 +67,6 @@ def _load(config: str | None) -> tuple[AnalysisConfig, list[Sample]]:
 
 def _families(cfg: AnalysisConfig, only: tuple[str, ...]) -> list[str]:
     configured = []
-    if cfg.plots.control:
-        configured.append("control")
     if cfg.plots.resolution:
         configured.append("resolution")
     if cfg.plots.datamc:
@@ -87,6 +85,20 @@ def _families(cfg: AnalysisConfig, only: tuple[str, ...]) -> list[str]:
         )
         sys.exit(1)
     return [f for f in configured if f in only]
+
+
+def _skim_progress(total: int):
+    """Progress printer for skim builds inside plot/fit (they can take minutes)."""
+    done = {"n": 0}
+
+    def _cb(info) -> None:
+        done["n"] += 1
+        console.print(
+            f"  [green]skimmed[/green] {info.sample} ({done['n']}/{total}): "
+            f"{info.rows:,} rows -> {info.path.stat().st_size / 1e6:,.0f} MB"
+        )
+
+    return _cb
 
 
 @click.group()
@@ -273,7 +285,8 @@ def plot(config_path: str, only: tuple[str, ...], only_vars: tuple[str, ...],
     families = _families(cfg, only)
 
     t0 = time.perf_counter()
-    skims = ensure_skims(cfg, samples, workers=workers, force=no_cache)
+    skims = ensure_skims(cfg, samples, workers=workers, force=no_cache,
+                         on_progress=_skim_progress(len(samples)))
     t_skim = time.perf_counter()
     console.print(f"Skims ready in {t_skim - t0:.1f}s")
 
@@ -378,7 +391,8 @@ def fit(config_path: str, workers: int, no_cache: bool, force: bool,
         console.print(f"[yellow]Warning:[/yellow] {w}")
 
     t0 = time.perf_counter()
-    skims = ensure_skims(cfg, samples, workers=workers, force=no_cache)
+    skims = ensure_skims(cfg, samples, workers=workers, force=no_cache,
+                         on_progress=_skim_progress(len(samples)))
     hists = fill_all(cfg, samples, skims, families=families,
                      only_vars=(fit_cfg.variable,), workers=workers,
                      use_cache=not no_cache, console=console)

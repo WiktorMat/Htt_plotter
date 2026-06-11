@@ -18,7 +18,7 @@ from pydantic import (
 
 from wham.expr import ExprError, parse
 
-FAMILIES = ("control", "resolution", "datamc", "cp", "fitcp", "display3d")
+FAMILIES = ("resolution", "datamc", "cp", "fitcp", "display3d")
 
 # Columns the 3D display needs if that family is configured.
 DISPLAY3D_COLUMNS = {"pt_1", "eta_1", "phi_1", "pt_2", "eta_2", "phi_2", "met_pt", "met_phi"}
@@ -89,7 +89,6 @@ class Display3DCfg(_Model):
 
 
 class PlotsCfg(_Model):
-    control: list[str] = []
     resolution: list[tuple[str, str]] = []  # [reco, reference] pairs
     datamc: list[str] = []
     cp: list[CPPlotCfg] = []
@@ -143,8 +142,6 @@ class AnalysisConfig(_Model):
     @model_validator(mode="after")
     def _plot_vars_defined(self) -> "AnalysisConfig":
         used: dict[str, str] = {}
-        for v in self.plots.control:
-            used[v] = "plots.control"
         for reco, ref in self.plots.resolution:
             used[reco] = used[ref] = "plots.resolution"
         for v in self.plots.datamc:
@@ -205,7 +202,6 @@ class AnalysisConfig(_Model):
                     self.qcd.os, self.qcd.iso, self.qcd.antiiso):
             if src:
                 cols |= parse(src).columns
-        cols.update(self.plots.control)
         for reco, ref in self.plots.resolution:
             cols.update((reco, ref))
         cols.update(self.plots.datamc)

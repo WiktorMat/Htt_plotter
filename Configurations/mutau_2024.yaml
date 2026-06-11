@@ -13,7 +13,10 @@ selection: >
   & iso_1 < 0.15
   & idDeepTau2018v2p5VSe_2 >= 2
   & idDeepTau2018v2p5VSmu_2 >= 4
-  & n_bjets == 2
+#  & n_bjets == 0
+# NB: no idDeepTau...VSjet_2 cut here on purpose — the signal region gets it
+# from qcd.iso below; putting it in the baseline empties the ABCD sidebands
+# and the QCD estimate comes out zero.
 
 trigger: "trg_singlemuon == 1 | trg_mt_cross == 1"
 weight: weight
@@ -47,7 +50,6 @@ variables:
   aco_mu_rho: {bins: 8, range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\mu\\rho)$", kind: angle}
 
 plots:
-  control:    [pt_1, pt_2, m_vis, mt_tot, mt_1, mt_2, met_pt, met_phi, dR]
   resolution:
     - [pt_1, pt_2]
     - [mt_tot, m_vis]

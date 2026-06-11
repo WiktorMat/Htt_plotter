@@ -73,7 +73,6 @@ variables:
   m_vis:   {{bins: 25, range: [0, 250]}}
   met_phi: {{bins: 10, range: [-3.2, 3.2], kind: angle}}
 plots:
-  control: [pt_1, m_vis]
   resolution: [[pt_1, pt_2], [m_vis, pt_1]]
   datamc: [pt_1, m_vis]
   cp:
