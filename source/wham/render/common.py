@@ -59,7 +59,7 @@ def stack_components(
         if not np.any(h1.view()["value"]):
             continue
         hists.append(h1)
-        labels.append(proc)
+        labels.append(cfg.processes[proc].label or proc)
         colors.append(cfg.processes[proc].color)
     return hists, labels, colors
 

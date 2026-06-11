@@ -47,6 +47,7 @@ class ProcessCfg(_Model):
     samples: list[str] = []
     color: str = "tab:gray"
     kind: Literal["mc", "data", "qcd"] = "mc"
+    label: str | None = None  # legend text; falls back to the process name
 
     @model_validator(mode="after")
     def _samples_match_kind(self) -> "ProcessCfg":

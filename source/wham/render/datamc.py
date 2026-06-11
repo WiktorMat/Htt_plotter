@@ -65,7 +65,12 @@ def render_datamc(
         ax.set_xlabel("")  # mplhep copies the hist axis name; the ratio panel owns it
         ax.set_ylabel("Events")
         ax.set_ylim(bottom=0)
-        ax.legend(fontsize=13, ncol=2)
+        # legend reads top-of-stack first: Data, then MC top to bottom, band last
+        handles, names = ax.get_legend_handles_labels()
+        by_label = dict(zip(names, handles))
+        order = ["Data", *reversed(labels), "Stat. unc."]
+        ax.legend([by_label[n] for n in order if n in by_label],
+                  [n for n in order if n in by_label], fontsize=17)
         ax.tick_params(labelbottom=False)
         cms_label(ax, cfg.lumi)
 

@@ -24,11 +24,13 @@ weight: weight
 # Order = stack draw order (bottom to top); data is drawn as points.
 processes:
   QCD:      {kind: qcd, color: "tab:olive"}
-  tt:       {samples: ["TTto*", "ST_tW_*"], color: "tab:purple"}
   dibosons: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown"}
+  tt:       {samples: ["TTto*", "ST_tW_*"], color: "tab:purple", label: "$t\\bar{t}$"}
   W+jets:   {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "tab:red"}
-  DY_2Mu:   {samples: ["DYto2Mu_*"], color: "tab:blue"}
-  DY_2Tau:  {samples: ["DYto2Tau_*"], color: "tab:orange"}
+  DY_2Mu:   {samples: ["DYto2Mu_*"], color: "tab:blue",
+             label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$, $\\tau_{h}\\rightarrow$ lepton fake"}
+  DY_2Tau:  {samples: ["DYto2Tau_*"], color: "tab:orange",
+             label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$"}
   data:     {kind: data, samples: ["Muon0_*", "Muon1_*"], color: "black"}
 
 qcd:
