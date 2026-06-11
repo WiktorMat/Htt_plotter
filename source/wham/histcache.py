@@ -60,6 +60,10 @@ def cache_key(
     if vcfg.get("column"):
         # conditional so keys of plain (non-aliased) variables stay stable
         payload["binning"]["column"] = vcfg["column"]
+    if vcfg.get("unroll"):
+        # the resolved payload (sub-columns + edges), so re-binning either
+        # sub-variable invalidates the unrolled histogram
+        payload["binning"]["unroll"] = vcfg["unroll"]
     if cfg.fake_factors is not None:
         from wham.muffin import signature
 

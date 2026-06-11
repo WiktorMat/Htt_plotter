@@ -96,6 +96,25 @@ def total_mc(h: Any, cfg: AnalysisConfig, region: str) -> tuple[np.ndarray, np.n
     return counts, sumw2
 
 
+def draw_unroll_guides(ax, cfg: AnalysisConfig, var: str) -> None:
+    """Block separators + y-slice captions for unrolled 2D variables."""
+    import matplotlib.transforms as mtransforms
+
+    vcfg = cfg.variables.get(var)
+    if vcfg is None or vcfg.unroll is None:
+        return
+    xname, yname = vcfg.unroll
+    nx = len(cfg.variables[xname].edges()) - 1
+    ye = cfg.variables[yname].edges()
+    trans = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
+    for i in range(1, len(ye) - 1):
+        ax.axvline(i * nx, color="gray", linestyle=":", linewidth=1, zorder=4)
+    for i in range(len(ye) - 1):
+        ax.text((i + 0.5) * nx, 0.985, f"[{ye[i]:g}, {ye[i + 1]:g})",
+                transform=trans, ha="center", va="top",
+                fontsize=9, color="gray", zorder=4)
+
+
 def step_with_band(ax, edges: np.ndarray, counts: np.ndarray, unc: np.ndarray,
                    color: str, label: str) -> None:
     ax.stairs(counts, edges, color=color, linewidth=2, label=label)

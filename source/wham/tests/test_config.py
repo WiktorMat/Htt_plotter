@@ -74,6 +74,30 @@ def test_unmatched_pattern_warns(workspace: dict) -> None:
     assert any("Zprime_*" in w for w in warnings)
 
 
+def test_unroll_validation(workspace: dict) -> None:
+    from wham.config import VariableCfg
+
+    with pytest.raises(ValueError, match="omit bins"):
+        VariableCfg(unroll=("a", "b"), bins=10, range=(0, 1))
+    with pytest.raises(ValueError, match="needs 'bins'"):
+        VariableCfg()
+    assert VariableCfg(unroll=("a", "b")).bins is None
+
+    base = workspace["yaml"].read_text()
+    bad = workspace["tmp"] / "unroll_bad.yaml"
+    bad.write_text(base.replace(
+        "  met_phi:", "  unr: {unroll: [m_vis, nonexistent]}\n  met_phi:"))
+    with pytest.raises(ValueError, match="undefined variable"):
+        load_config(bad)
+
+    good = workspace["tmp"] / "unroll_good.yaml"
+    good.write_text(base.replace(
+        "  met_phi:", "  unr: {unroll: [m_vis, pt_1]}\n  met_phi:"))
+    cfg = load_config(good)
+    # an unrolled variable reads both source columns
+    assert cfg.columns_of_var("unr") == {"m_vis", "pt_1"}
+
+
 def test_variable_binning_validation() -> None:
     from wham.config import VariableCfg
 

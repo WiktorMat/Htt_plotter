@@ -100,6 +100,10 @@ Notes:
   strictly increasing edges (then omit `range`). To plot one column with
   several binnings, define extra variables with `column:` pointing at the
   source column — each gets its own plot and cached histogram.
+- Unrolled 2D discriminants: `{unroll: [x_var, y_var]}` defines a derived
+  1D variable with `nx*ny` unit bins (x within blocks of y, y-major).
+  It plots like any variable (block separators + y-slice captions drawn
+  automatically) and serves as a fit category observable.
 - Sample patterns are globs matched against directories in `data_dir`
   (`<data_dir>/<SAMPLE>/nominal/merged.parquet`). Ambiguous matches are errors.
 - MC scale = `lumi * xs * filter_efficiency / eff`; per-event `weight` column on top.
@@ -181,11 +185,15 @@ A fit config declares:
   scaled whole (`{scale: "r"}`) or split into weighted template components,
   each with its own per-event weight column and scale expression. Anything
   not listed is a plain background.
-- **systematics** — `lnN` (with `scaleFactor`) and `rateParam` (free-floating
-  normalization, one shared parameter across everything it matches);
-  optional `categories:` restricts one to specific bins. Patterns match the
-  config process names (`W+jets` etc.); sanitization and component templates
-  are resolved internally.
+- **systematics** — `lnN` (with `scaleFactor`), `rateParam` (free-floating
+  normalization, one shared parameter across everything it matches) and
+  `shape` (weight-based template variations: `weight_up`/`weight_down`
+  expressions replace the per-event weight of the matched MC processes —
+  the variation also propagates into the QCD subtraction — or, matching
+  the QCD process, replace `qcd.ff_weight` to vary the data-driven
+  estimate). Optional `categories:` restricts one to specific bins.
+  Patterns match the config process names (`W+jets` etc.); sanitization and
+  component templates are resolved internally.
 - **scans** — 1D entries give profiled −2ΔlnL curves, two-POI entries a
   −2ΔlnL heatmap with 68/95% CL contours. Windows auto-center on the best
   fit (± 10σ) unless `range`/`ranges` is given; omitted entirely → one 1D

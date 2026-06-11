@@ -17,7 +17,14 @@ import yaml
 from pydantic import Field, model_validator
 
 from wham import util
-from wham.config import AnalysisConfig, ComponentFillCfg, PlotsCfg, _Model, load_config
+from wham.config import (
+    AnalysisConfig,
+    ComponentFillCfg,
+    PlotsCfg,
+    VariationCfg,
+    _Model,
+    load_config,
+)
 from wham.expr import ExprError, parse
 
 FITS_DIR_NAME = "fits"
@@ -191,22 +198,41 @@ class ScanCfg(_Model):
 
 class SystematicCfg(_Model):
     name: str
-    effect: Literal["lnN", "rateParam"] = "lnN"
+    effect: Literal["lnN", "rateParam", "shape"] = "lnN"
     processes: list[str]  # fnmatch patterns over process/template names
     categories: list[str] | None = None  # restrict to these bins; default all
     scaleFactor: float | None = Field(default=None, gt=0)  # lnN only
     init: float = 1.0  # rateParam starting value
     range: tuple[float, float] | None = None  # rateParam bounds, e.g. [0.1, 5]
+    # shape only: replacement expressions for the per-event weight (or, when
+    # the pattern matches the QCD process, for qcd.ff_weight)
+    weight_up: str | None = None
+    weight_down: str | None = None
 
     @model_validator(mode="after")
     def _fields_match_effect(self) -> "SystematicCfg":
+        has_weights = self.weight_up is not None or self.weight_down is not None
         if self.effect == "lnN":
             if self.scaleFactor is None:
                 raise ValueError(f"systematic '{self.name}': lnN needs a scaleFactor")
             if self.range is not None or self.init != 1.0:
                 raise ValueError(f"systematic '{self.name}': init/range are rateParam-only")
-        elif self.scaleFactor is not None:
-            raise ValueError(f"systematic '{self.name}': rateParam takes no scaleFactor")
+            if has_weights:
+                raise ValueError(f"systematic '{self.name}': weight_up/down are shape-only")
+        elif self.effect == "rateParam":
+            if self.scaleFactor is not None:
+                raise ValueError(f"systematic '{self.name}': rateParam takes no scaleFactor")
+            if has_weights:
+                raise ValueError(f"systematic '{self.name}': weight_up/down are shape-only")
+        else:  # shape
+            if self.weight_up is None or self.weight_down is None:
+                raise ValueError(
+                    f"systematic '{self.name}': shape needs weight_up and weight_down"
+                )
+            if self.scaleFactor is not None or self.range is not None or self.init != 1.0:
+                raise ValueError(
+                    f"systematic '{self.name}': scaleFactor/init/range do not apply to shape"
+                )
         return self
 
 
@@ -336,6 +362,58 @@ def fit_families(fit: FitConfig) -> list[str]:
     return ["datamc"] + (["fitcp"] if has_components else [])
 
 
+def shape_affected(fit: FitConfig, cfg: AnalysisConfig, syst: SystematicCfg) -> set[str]:
+    """Config processes whose templates move under a shape systematic.
+    A varied MC weight also shifts the data-driven QCD estimate through the
+    anti-iso subtraction, so the QCD process is always included."""
+    qcd_proc = cfg.qcd_process()
+    matched_mc = {p for p, pc in cfg.processes.items()
+                  if pc.kind == "mc" and syst_matches(syst.processes, p)}
+    if matched_mc:
+        return matched_mc | ({qcd_proc} if qcd_proc is not None else set())
+    return {qcd_proc} if qcd_proc is not None else set()
+
+
+def shape_variations(fit: FitConfig, cfg: AnalysisConfig) -> list[VariationCfg]:
+    """Resolve effect=shape systematics into concrete fill variations:
+    matched kind=mc processes get the replacement weight; matching the QCD
+    process instead varies qcd.ff_weight (the data-driven estimate)."""
+    out: list[VariationCfg] = []
+    qcd_proc = cfg.qcd_process()
+    for syst in fit.systematics:
+        if syst.effect != "shape":
+            continue
+        matched_mc = [p for p, pc in cfg.processes.items()
+                      if pc.kind == "mc" and syst_matches(syst.processes, p)]
+        matches_qcd = qcd_proc is not None and syst_matches(syst.processes, qcd_proc)
+        if matched_mc and matches_qcd:
+            raise ValueError(
+                f"shape systematic '{syst.name}' matches both MC processes "
+                f"({matched_mc}) and the QCD process — split it in two"
+            )
+        if matches_qcd:
+            if cfg.qcd.method != "ff":
+                raise ValueError(
+                    f"shape systematic '{syst.name}' varies the QCD estimate, "
+                    "which requires qcd.method=ff"
+                )
+            out.append(VariationCfg(
+                name=syst.name, target="qcd_ff",
+                weight_up=syst.weight_up, weight_down=syst.weight_down,
+            ))
+        elif matched_mc:
+            out.append(VariationCfg(
+                name=syst.name, target="weight", processes=matched_mc,
+                weight_up=syst.weight_up, weight_down=syst.weight_down,
+            ))
+        else:
+            raise ValueError(
+                f"shape systematic '{syst.name}' matches no kind=mc process "
+                f"and not the QCD process (patterns {syst.processes})"
+            )
+    return out
+
+
 def _component_fills(fit: FitConfig, variable: str) -> list[ComponentFillCfg]:
     return [
         ComponentFillCfg(
@@ -352,7 +430,10 @@ def category_analysis(fit: FitConfig, cfg: AnalysisConfig, cat: CategoryCfg) -> 
     plots reduced to exactly the fills this category's templates need."""
     selection = cfg.selection if cat.cut is None else f"({cfg.selection}) & ({cat.cut})"
     plots = PlotsCfg(datamc=[cat.variable], fitcp=_component_fills(fit, cat.variable))
-    return cfg.model_copy(update={"selection": selection, "plots": plots})
+    return cfg.model_copy(update={
+        "selection": selection, "plots": plots,
+        "variations": shape_variations(fit, cfg),
+    })
 
 
 def union_analysis(fit: FitConfig, cfg: AnalysisConfig) -> AnalysisConfig:
@@ -363,7 +444,10 @@ def union_analysis(fit: FitConfig, cfg: AnalysisConfig) -> AnalysisConfig:
     variables = list(dict.fromkeys(c.variable for c in fit.categories))
     fitcp = [f for v in variables for f in _component_fills(fit, v)]
     plots = PlotsCfg(datamc=variables, fitcp=fitcp)
-    return cfg.model_copy(update={"selection": selection, "plots": plots})
+    return cfg.model_copy(update={
+        "selection": selection, "plots": plots,
+        "variations": shape_variations(fit, cfg),
+    })
 
 
 # ------------------------------------------------------------- loading
@@ -466,5 +550,15 @@ def load_fit_config(path: str | Path) -> tuple[FitConfig, AnalysisConfig]:
                 f"systematic '{syst.name}' matches no datacard process "
                 f"(patterns {syst.processes}, processes {all_dc})"
             )
+        if syst.effect == "shape":
+            for label, src in (("weight_up", syst.weight_up),
+                               ("weight_down", syst.weight_down)):
+                try:
+                    parse(src)
+                except ExprError as e:
+                    raise ValueError(
+                        f"systematic '{syst.name}': invalid {label}: {e}"
+                    ) from None
+    shape_variations(fit, cfg)  # raises on unresolvable shape systematics
 
     return fit, cfg

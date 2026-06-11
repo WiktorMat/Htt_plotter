@@ -71,13 +71,17 @@ variables:
   bdt_ff_qcd: {column: BDT_FF_score_QCD_sublead, bins: 45, range: [0, 0.45],
                label: "BDT FF score (QCD)"}
   aco_mu_rho: {bins: 8, range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\mu\\rho)$", kind: angle}
+  # 2D discriminant unrolled to 1D: phiCP in bins of m_vis (y-major blocks)
+  aco_unrolled: {unroll: [aco_mu_rho, m_vis_varbins],
+                 label: "$\\phi_{CP}(\\mu\\rho)$ unrolled in $m_{vis}$"}
 
 plots:
   resolution:
     - [pt_1, pt_2]
     - [mt_tot, m_vis]
   datamc:     [pt_1, pt_2, m_vis, m_vis_coarse, m_vis_varbins,
-               mt_tot, mt_1, mt_2, met_pt, met_phi, dR, bdt_ff_qcd]
+               mt_tot, mt_1, mt_2, met_pt, met_phi, dR, bdt_ff_qcd,
+               aco_unrolled]
   # anti-iso QCD (data - MC) before/after the FF weight + weighted/raw ratio
   ffcheck:    [bdt_ff_qcd, pt_2, m_vis, mt_tot, met_pt]
   cp:

@@ -208,6 +208,15 @@ def test_systematic_cfg_validation() -> None:
     s = SystematicCfg(name="x", effect="rateParam", processes=["A"], range=(0.1, 5.0))
     assert s.init == 1.0
 
+    with pytest.raises(ValueError, match="needs weight_up and weight_down"):
+        SystematicCfg(name="x", effect="shape", processes=["A"], weight_up="w")
+    with pytest.raises(ValueError, match="do not apply to shape"):
+        SystematicCfg(name="x", effect="shape", processes=["A"],
+                      weight_up="w", weight_down="w2", scaleFactor=1.1)
+    with pytest.raises(ValueError, match="shape-only"):
+        SystematicCfg(name="x", effect="lnN", processes=["A"], scaleFactor=1.1,
+                      weight_up="w")
+
 
 def test_dc_name_sanitization() -> None:
     assert dc_name("W+jets") == "W_jets"
@@ -396,6 +405,65 @@ def test_datacard_parent_matching(fit_setup, tmp_path: Path) -> None:
     assert by_proc["TT"] == "-"
 
 
+_TT_SHAPE = ('  - {name: tt_shape, effect: shape, processes: [TT],\n'
+             '     weight_up: "weight * 2", weight_down: "weight * 0.5"}')
+
+
+def test_shape_systematic_templates_and_datacard(fit_setup, tmp_path: Path) -> None:
+    from wham.fitconfig import shape_affected
+
+    s = fit_setup("scale", extra=_TT_SHAPE)
+    fit = s["fit"]
+    templates, signals, backgrounds = fit_templates(fit, s["cfg"], s["hists"])
+    t = templates["SR"]
+
+    assert "TT_tt_shapeUp" in t and "TT_tt_shapeDown" in t
+    assert t["TT_tt_shapeUp"].view()["value"].sum() == pytest.approx(
+        2 * t["TT"].view()["value"].sum(), rel=1e-9)
+    assert "DY_tt_shapeUp" not in t  # unmatched process: no varied template
+    if "QCD" in t:  # the varied subtraction propagates into the QCD estimate
+        assert "QCD_tt_shapeUp" in t
+
+    card = tmp_path / "datacard.txt"
+    syst = next(x for x in fit.systematics if x.effect == "shape")
+    write_datacard(card, fit=fit, templates=templates, signal_names=signals,
+                   background_names=backgrounds,
+                   parents=template_parents(fit, s["cfg"]),
+                   shape_affected_map={syst.name: shape_affected(fit, s["cfg"], syst)})
+    text = card.read_text()
+    row = next(l.split() for l in text.splitlines() if l.startswith("tt_shape"))
+    assert row[1] == "shape"
+    procs = [l.split()[1:] for l in text.splitlines() if l.split()[:1] == ["process"]][0]
+    by_proc = dict(zip(procs, row[2:]))
+    assert by_proc["TT"] == "1" and by_proc["DY"] == "-"
+
+    # shapes roundtrip includes the Up/Down histograms
+    shapes_path = tmp_path / "shapes.root"
+    write_shapes(shapes_path, templates)
+    with uproot.open(shapes_path) as f:
+        assert np.allclose(f["SR/TT_tt_shapeUp"].values(),
+                           t["TT_tt_shapeUp"].view()["value"])
+
+
+def test_shape_resolution_errors(workspace: dict) -> None:
+    fit_yaml = workspace["tmp"] / "bad_shape.yaml"
+    fit_yaml.write_text(
+        f"""
+name: bad_shape
+analysis: {workspace["yaml"]}
+{_ONE_CATEGORY}
+{_SCALE_MODEL}
+systematics:
+  - {{name: ff_shape, effect: shape, processes: [QCD],
+     weight_up: "pt_2 / 50", weight_down: "pt_2 / 200"}}
+""",
+        encoding="utf-8",
+    )
+    # the synthetic analysis uses qcd.method=abcd
+    with pytest.raises(ValueError, match="requires qcd.method=ff"):
+        load_fit_config(fit_yaml)
+
+
 def test_export_key_sensitivity(fit_setup) -> None:
     s0 = fit_setup("components", toy=0.0)
     s3 = fit_setup("components", toy=0.3)
@@ -434,7 +502,7 @@ def test_datacard_only_skip_logic(fit_setup) -> None:
     reason="apptainer or combine image unavailable",
 )
 def test_full_rate_fit_in_container(fit_setup) -> None:
-    s = fit_setup("scale")
+    s = fit_setup("scale", extra=_TT_SHAPE)
     fit = s["fit"]
     fitdir = run_fit(fit, s["cfg"], s["hists"], {("SR", "datamc", "met_phi"): "k"})
 
@@ -447,6 +515,9 @@ def test_full_rate_fit_in_container(fit_setup) -> None:
     assert result["params"]["r"]["value"] == pytest.approx(1.0, abs=0.05)
     assert result["params"]["r"]["error"] > 0
     assert "r" in result["impacts"]
+    # the shape nuisance is fitted: Asimov pull ~ 0, constrained ~ 1
+    assert result["params"]["tt_shape"]["value"] == pytest.approx(0.0, abs=0.2)
+    assert 0.05 < result["params"]["tt_shape"]["error"] <= 1.2
 
     scan = uproot.open(fitdir / scan_file(fit, fit.resolved_scans()[0]))
     assert len(scan["limit"]["r"].array()) >= 10

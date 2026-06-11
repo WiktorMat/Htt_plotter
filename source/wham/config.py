@@ -29,15 +29,27 @@ class _Model(BaseModel):
 
 
 class VariableCfg(_Model):
-    bins: int | tuple[float, ...]  # bin count (needs range) or explicit ascending edges
+    bins: int | tuple[float, ...] | None = None  # count (needs range) or ascending edges
     range: tuple[float, float] | None = None
     column: str | None = None  # source column; defaults to the variable name
     label: str | None = None
     kind: Literal["scalar", "angle"] = "scalar"
     relative: bool = True  # resolution: (reco-ref)/ref vs reco-ref
+    # 2D discriminant unrolled to 1D: [x, y] variable names; the derived
+    # variable has nx*ny unit-width bins, index = ix + nx*iy (y-major)
+    unroll: tuple[str, str] | None = None
 
     @model_validator(mode="after")
     def _binning_valid(self) -> "VariableCfg":
+        if self.unroll is not None:
+            if self.bins is not None or self.range is not None or self.column is not None:
+                raise ValueError(
+                    "an 'unroll' variable derives its binning from the two "
+                    "referenced variables; omit bins/range/column"
+                )
+            return self
+        if self.bins is None:
+            raise ValueError("a variable needs 'bins' (or 'unroll')")
         if isinstance(self.bins, int):
             if self.bins <= 0:
                 raise ValueError(f"bins must be positive, got {self.bins}")
@@ -53,6 +65,13 @@ class VariableCfg(_Model):
             if self.range is not None:
                 raise ValueError("'range' must be omitted when 'bins' lists explicit edges")
         return self
+
+    def edges(self) -> list[float]:
+        """Explicit bin edges (plain-binned variables only)."""
+        if isinstance(self.bins, int):
+            lo, hi = self.range
+            return [lo + (hi - lo) * i / self.bins for i in range(self.bins + 1)]
+        return [float(e) for e in self.bins]
 
     @field_validator("column")
     @classmethod
@@ -121,6 +140,21 @@ class ComponentFillCfg(_Model):
     var: str
     process: str
     components: dict[str, str]  # component name -> weight column/expression
+
+
+class VariationCfg(_Model):
+    """A weight-based shape variation, filled into the histogram variation
+    axis as <name>_up / <name>_down. Set programmatically by `wham fit`.
+
+    target=weight: the expressions replace the per-event weight for the
+    listed (kind=mc) processes. target=qcd_ff: they replace qcd.ff_weight
+    in the anti-iso fills, varying the data-driven QCD estimate."""
+
+    name: str
+    processes: list[str] = []  # concrete process names (target=weight)
+    weight_up: str
+    weight_down: str
+    target: Literal["weight", "qcd_ff"] = "weight"
 
 
 class Display3DCfg(_Model):
@@ -200,6 +234,8 @@ class AnalysisConfig(_Model):
     plots: PlotsCfg = PlotsCfg()
     style: StyleCfg = StyleCfg()
     fake_factors: FakeFactorsCfg | None = None
+    # weight-based shape variations; set programmatically by `wham fit`
+    variations: list[VariationCfg] = []
 
     # ---- validators -------------------------------------------------
 
@@ -255,6 +291,24 @@ class AnalysisConfig(_Model):
         return self
 
     @model_validator(mode="after")
+    def _unroll_refs_valid(self) -> "AnalysisConfig":
+        for name, v in self.variables.items():
+            if v.unroll is None:
+                continue
+            for ref in v.unroll:
+                sub = self.variables.get(ref)
+                if sub is None:
+                    raise ValueError(
+                        f"unroll variable '{name}' references undefined variable '{ref}'"
+                    )
+                if sub.unroll is not None:
+                    raise ValueError(
+                        f"unroll variable '{name}' references '{ref}', which is "
+                        "itself unrolled — nesting is not supported"
+                    )
+        return self
+
+    @model_validator(mode="after")
     def _datamc_needs_data(self) -> "AnalysisConfig":
         if self.plots.datamc or self.plots.ffcheck:
             n_data = sum(1 for p in self.processes.values() if p.kind == "data")
@@ -299,6 +353,13 @@ class AnalysisConfig(_Model):
         vcfg = self.variables.get(var)
         return vcfg.column if (vcfg is not None and vcfg.column) else var
 
+    def columns_of_var(self, var: str) -> set[str]:
+        """All source columns a variable reads (unrolled ones read two)."""
+        vcfg = self.variables.get(var)
+        if vcfg is not None and vcfg.unroll is not None:
+            return {self.column_of(ref) for ref in vcfg.unroll}
+        return {self.column_of(var)}
+
     def required_columns(self) -> frozenset[str]:
         """Union of every column any configured fill could touch."""
         cols: set[str] = {"weight", "os"}
@@ -307,15 +368,17 @@ class AnalysisConfig(_Model):
             if src:
                 cols |= parse(src).columns
         for reco, ref in self.plots.resolution:
-            cols.update((self.column_of(reco), self.column_of(ref)))
-        cols.update(self.column_of(v) for v in self.plots.datamc)
-        cols.update(self.column_of(v) for v in self.plots.ffcheck)
+            cols |= self.columns_of_var(reco) | self.columns_of_var(ref)
+        for v in (*self.plots.datamc, *self.plots.ffcheck):
+            cols |= self.columns_of_var(v)
         for c in self.plots.cp:
-            cols.update((self.column_of(c.var), c.even, c.odd))
+            cols |= self.columns_of_var(c.var) | {c.even, c.odd}
         for f in self.plots.fitcp:
-            cols.add(self.column_of(f.var))
+            cols |= self.columns_of_var(f.var)
             for weight in f.components.values():
                 cols |= parse(weight).columns
+        for v in self.variations:
+            cols |= parse(v.weight_up).columns | parse(v.weight_down).columns
         if self.plots.display3d is not None:
             cols |= DISPLAY3D_COLUMNS
         if self.fake_factors is not None:

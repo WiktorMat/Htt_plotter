@@ -21,7 +21,14 @@ from wham.combine import (
 )
 from wham.config import AnalysisConfig
 from wham.fitconfig import FitConfig, ScanCfg, dc_name
-from wham.render.common import cms_label, cms_label_split, draw_unc_band, save, var_label
+from wham.render.common import (
+    cms_label,
+    cms_label_split,
+    draw_unc_band,
+    draw_unroll_guides,
+    save,
+    var_label,
+)
 
 # colors for the 2nd, 3rd, ... component template of a process (the first
 # keeps the process color from the analysis config)
@@ -80,7 +87,7 @@ def _stack_dc_order(fit: FitConfig, cfg: AnalysisConfig) -> list[str]:
 
 def _render_shape_dir(fit: FitConfig, cfg: AnalysisConfig, shapes, title: str,
                       outdir: Path, fname: str, console, edges=None,
-                      xlabel: str = "") -> None:
+                      xlabel: str = "", var: str | None = None) -> None:
     colors = _color_map(fit, cfg)
 
     # combine's saved shapes use unit-width bins; the real edges come from
@@ -149,6 +156,8 @@ def _render_shape_dir(fit: FitConfig, cfg: AnalysisConfig, shapes, title: str,
     ax.text(0.03, 0.97, title, transform=ax.transAxes, ha="left", va="top",
             fontsize=14, fontweight="bold")
     cms_label(ax, cfg)
+    if var is not None:
+        draw_unroll_guides(ax, cfg, var)
     _stamp(ax, fit)
 
     safe = np.where(total_vals > 0, total_vals, np.nan)
@@ -387,7 +396,7 @@ def render_fit(fit: FitConfig, cfg: AnalysisConfig, fitdir: Path, console=None) 
                         f"{label} — {cat.name}" if multi else label,
                         fitdir, f"{fname}_{cat.name}" if multi else fname,
                         console, edges=edges.get(cat.name),
-                        xlabel=var_label(cfg, cat.variable),
+                        xlabel=var_label(cfg, cat.variable), var=cat.variable,
                     )
 
     # ---- nuisance pulls + POI impacts

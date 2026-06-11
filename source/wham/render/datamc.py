@@ -13,6 +13,7 @@ from wham.config import AnalysisConfig
 from wham.render.common import (
     cms_label,
     draw_unc_band,
+    draw_unroll_guides,
     save,
     slice_1d,
     stack_components,
@@ -73,6 +74,7 @@ def render_datamc(
                   [n for n in order if n in by_label], fontsize=17)
         ax.tick_params(labelbottom=False)
         cms_label(ax, cfg)
+        draw_unroll_guides(ax, cfg, var)
 
         # ---- ratio panel
         safe_mc = np.where(mc > 0, mc, np.nan)

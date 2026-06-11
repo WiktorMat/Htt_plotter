@@ -168,6 +168,112 @@ def test_ffcheck_raw_vs_weighted(workspace: dict) -> None:
         assert got == pytest.approx(float(expected), rel=1e-9), region
 
 
+def test_unrolled_fill_matches_2d_reference(workspace: dict) -> None:
+    from wham.config import VariableCfg
+
+    cfg = load_config(workspace["yaml"])
+    variables = {**cfg.variables, "unr": VariableCfg(unroll=("m_vis", "pt_1"))}
+    plots = cfg.plots.model_copy(update={"datamc": ["unr"]})
+    cfg = cfg.model_copy(update={"variables": variables, "plots": plots})
+    samples, _ = discover_samples(cfg)
+    skims = ensure_skims(cfg, samples, workers=1)
+    spec = build_fill_spec(cfg, families=["datamc"])
+
+    hists: dict = {}
+    for s in samples:
+        merge_hists(hists, fill_sample(s, skims[s.name], spec))
+
+    h = hists[("datamc", "unr")]
+    assert h.axes[-1].size == 25 * 20  # m_vis(25) x pt_1(20)
+
+    sample = next(s for s in samples if s.name == "TT_test")
+    df = _reference_frame(sample, cfg)
+    sel = (df.trg == 1) & (df.os == 1) & (df.id_2 >= 5)  # OS_iso (abcd)
+    ref2d, _, _ = np.histogram2d(
+        df.m_vis[sel], df.pt_1[sel], bins=[25, 20],
+        range=[[0, 250], [0, 100]], weights=df.w[sel],
+    )
+    got = h[{"process": "TT", "region": "OS_iso", "variation": "nominal"}].view()["value"]
+    # index = ix + nx*iy (y-major blocks) -> transpose then flatten
+    assert np.allclose(got, ref2d.T.reshape(-1))
+
+
+def test_weight_variation_fills_and_completion(workspace: dict) -> None:
+    from wham.config import VariationCfg
+    from wham.fill import complete_variation_slices
+    from wham.qcd import estimate_qcd
+
+    cfg = load_config(workspace["yaml"])
+    cfg = cfg.model_copy(update={"variations": [VariationCfg(
+        name="tt_sys", processes=["TT"],
+        weight_up="weight * 2", weight_down="weight * 0.5",
+    )]})
+    samples, _ = discover_samples(cfg)
+    skims = ensure_skims(cfg, samples, workers=1)
+    spec = build_fill_spec(cfg, families=["datamc"], only_vars=("m_vis",))
+
+    hists: dict = {}
+    for s in samples:
+        merge_hists(hists, fill_sample(s, skims[s.name], spec))
+    complete_variation_slices(spec, hists)
+
+    h = hists[("datamc", "m_vis")]
+    assert sorted(h.axes["variation"]) == ["nominal", "tt_sys_down", "tt_sys_up"]
+
+    def total(proc: str, variation: str) -> float:
+        return float(h[{"process": proc, "region": "OS_iso",
+                        "variation": variation}].view()["value"].sum())
+
+    assert total("TT", "tt_sys_up") == pytest.approx(2 * total("TT", "nominal"), rel=1e-9)
+    assert total("TT", "tt_sys_down") == pytest.approx(0.5 * total("TT", "nominal"), rel=1e-9)
+    # unmatched processes get the nominal content copied in
+    assert total("DY", "tt_sys_up") == total("DY", "nominal")
+    assert total("data", "tt_sys_up") == total("data", "nominal")
+
+    # the varied TT subtraction propagates into that variation's QCD estimate
+    estimate_qcd(cfg, hists)
+    assert total("QCD", "tt_sys_up") <= total("QCD", "nominal")
+
+
+def test_qcd_ff_variation(workspace: dict) -> None:
+    from wham.config import VariationCfg
+    from wham.fill import complete_variation_slices
+
+    cfg = load_config(workspace["yaml"])
+    qcd = cfg.qcd.model_copy(update={"method": "ff", "ff_weight": "pt_2 / 100"})
+    cfg = cfg.model_copy(update={"qcd": qcd, "variations": [VariationCfg(
+        name="ffv", target="qcd_ff",
+        weight_up="pt_2 / 50", weight_down="pt_2 / 200",
+    )]})
+    samples, _ = discover_samples(cfg)
+    skims = ensure_skims(cfg, samples, workers=1)
+    spec = build_fill_spec(cfg, families=["datamc"], only_vars=("m_vis",))
+
+    hists: dict = {}
+    for s in samples:
+        merge_hists(hists, fill_sample(s, skims[s.name], spec))
+    complete_variation_slices(spec, hists)
+
+    h = hists[("datamc", "m_vis")]
+    sample = next(s for s in samples if s.kind == "data")
+    df = _reference_frame(sample, cfg)
+    anti = (
+        (df.trg == 1) & (df.os == 1) & (df.id_2 > 1) & (df.id_2 < 5)
+        & (df.m_vis >= 0) & (df.m_vis < 250)
+    )
+
+    def total(region: str, variation: str) -> float:
+        return float(h[{"process": "data", "region": region,
+                        "variation": variation}].view()["value"].sum())
+
+    # anti-iso entries carry the varied FF weight; iso entries are copied
+    assert total("OS_antiiso", "ffv_up") == pytest.approx(
+        float((df.w * df.pt_2 / 50)[anti].sum()), rel=1e-9)
+    assert total("OS_antiiso", "ffv_down") == pytest.approx(
+        float((df.w * df.pt_2 / 200)[anti].sum()), rel=1e-9)
+    assert total("OS_iso", "ffv_up") == total("OS_iso", "nominal")
+
+
 def test_fitcp_cache_key_includes_weight_columns(workspace: dict) -> None:
     from wham.config import ComponentFillCfg
     from wham.fill import spec_extras

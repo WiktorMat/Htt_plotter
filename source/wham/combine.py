@@ -31,6 +31,7 @@ from wham.fitconfig import (
     datacard_processes,
     dc_name,
     scale_map,
+    shape_affected,
     syst_matches,
     template_parents,
     translate_formula,
@@ -138,8 +139,8 @@ def dump_script_source(fit: FitConfig) -> str:
 # ------------------------------------------------------------- templates
 
 
-def _slice1d(h: Any, process: str, region: str):
-    return h[{"process": process, "region": region, "variation": "nominal"}].copy()
+def _slice1d(h: Any, process: str, region: str, variation: str = "nominal"):
+    return h[{"process": process, "region": region, "variation": variation}].copy()
 
 
 def _clip_negative(h1, label: str, console=None) -> None:
@@ -177,6 +178,18 @@ def fit_templates(
     """
     region = signal_region(cfg)
     signal_names, backgrounds = datacard_processes(fit, cfg)
+    shape_systs = [(s, shape_affected(fit, cfg, s))
+                   for s in fit.systematics if s.effect == "shape"]
+
+    def shape_slices(cat_name: str, proc: str):
+        """(syst, datacard suffix, variation label) triples for one process."""
+        for syst, affected in shape_systs:
+            if syst.categories is not None and cat_name not in syst.categories:
+                continue
+            if proc not in affected:
+                continue
+            yield from ((syst, f"{syst.name}Up", f"{syst.name}_up"),
+                        (syst, f"{syst.name}Down", f"{syst.name}_down"))
 
     templates: dict[str, dict[str, Any]] = {}
     for cat in fit.categories:
@@ -204,13 +217,15 @@ def fit_templates(
                             f"in '{cat.name}'[/yellow]"
                         )
                 t[dc_name(proc)] = h1
+                for _syst, suffix, vlabel in shape_slices(cat.name, proc):
+                    hv = _slice1d(h_datamc, proc, region, vlabel)
+                    _clip_negative(hv, f"{cat.name}/{proc} {suffix}", console)
+                    t[f"{dc_name(proc)}_{suffix}"] = hv
             else:
                 h_fitcp = hists[("fitcp", cat.variable)]
                 comp_hists = []
                 for comp in pm.components:
-                    h1 = h_fitcp[
-                        {"process": proc, "region": comp, "variation": "nominal"}
-                    ].copy()
+                    h1 = _slice1d(h_fitcp, proc, comp)
                     _clip_negative(h1, f"{cat.name}/{proc} {comp}", console)
                     comp_hists.append((comp, h1))
                 if fit.toy.asymmetry != 0.0 and len(comp_hists) == 2:
@@ -218,6 +233,11 @@ def fit_templates(
                                          fit.toy.asymmetry)
                 for comp, h1 in comp_hists:
                     t[dc_name(f"{proc}_{comp}")] = h1
+                for _syst, suffix, vlabel in shape_slices(cat.name, proc):
+                    for comp in pm.components:
+                        hv = _slice1d(h_fitcp, proc, comp, vlabel)
+                        _clip_negative(hv, f"{cat.name}/{proc} {comp} {suffix}", console)
+                        t[f"{dc_name(f'{proc}_{comp}')}_{suffix}"] = hv
         templates[cat.name] = t
 
     cats = [c.name for c in fit.categories]
@@ -250,6 +270,7 @@ def write_datacard(
     signal_names: list[str],
     background_names: list[str],
     parents: dict[str, str] | None = None,
+    shape_affected_map: dict[str, set[str]] | None = None,
 ) -> None:
     """Multi-bin datacard: one column per (category, process present there)."""
     parents = parents or {}
@@ -291,15 +312,21 @@ def write_datacard(
     ]
 
     for syst in fit.systematics:
-        if syst.effect != "lnN":
-            continue
-        cells = [
-            f"{syst.scaleFactor:g}"
-            if allowed(syst, c) and syst_matches(syst.processes, n, parents.get(n))
-            else "-"
-            for c, n in columns
-        ]
-        lines.append(row(syst.name, syst.effect, cells))
+        if syst.effect == "lnN":
+            cells = [
+                f"{syst.scaleFactor:g}"
+                if allowed(syst, c) and syst_matches(syst.processes, n, parents.get(n))
+                else "-"
+                for c, n in columns
+            ]
+            lines.append(row(syst.name, syst.effect, cells))
+        elif syst.effect == "shape":
+            affected = (shape_affected_map or {}).get(syst.name, set())
+            cells = [
+                "1" if allowed(syst, c) and parents.get(n, n) in affected else "-"
+                for c, n in columns
+            ]
+            lines.append(row(syst.name, "shape", cells))
 
     # rateParam: free normalization parameters, one line per matching
     # (bin, process); the shared name makes them one parameter in combine
@@ -473,6 +500,10 @@ def run_fit(
             fit=fit, templates=templates,
             signal_names=signal_names, background_names=background_names,
             parents=template_parents(fit, cfg),
+            shape_affected_map={
+                s.name: shape_affected(fit, cfg, s)
+                for s in fit.systematics if s.effect == "shape"
+            },
         )
         (fitdir / MODEL_FILE).write_text(model_source(fit), encoding="utf-8")
         if console is not None:
