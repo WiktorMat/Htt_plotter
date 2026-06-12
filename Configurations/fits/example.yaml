@@ -26,6 +26,33 @@ systematics:
   # free-floating QCD normalization (one shared parameter)
   - {name: norm_qcd,     effect: rateParam, processes: [QCD], range: [0.1, 5]}
 
+  # --- weight-based shape systematics ----------------------------------------
+  # weight_up/weight_down REPLACE the per-event weight for the matched
+  # processes; both templates land in shapes.root and the parameter is
+  # profiled in the fit.
+  # NOTE: kinematic variations stored in the inputs (TES or others as variation
+  # trees or shifted columns) are not supported yet — current files carry
+  # only nominal/ — planned once such inputs exist.
+
+  # top-pT reweighting uncertainty (standard prescription: up = correction
+  # applied twice, down = removed). Because QCD is data-driven, the varied tt
+  # also shifts the anti-iso subtraction: wham re-derives the QCD estimate per
+  # variation and writes QCD_top_pt_reweightUp/Down tied to the same parameter.
+  - name: top_pt_reweight
+    effect: shape
+    processes: [tt]
+    weight_up:   "weight * w_Top_pt_Reweighting"
+    weight_down: "weight / w_Top_pt_Reweighting"
+
+  # fake-factor statistical variation. Matching the QCD process makes the
+  # expressions replace qcd.ff_weight instead: here the nominal BDT score is
+  # scaled by the classical FF up/down-to-nominal ratio.
+  - name: ff_qcd_stat
+    effect: shape
+    processes: [QCD]
+    weight_up:   "BDT_FF_score_QCD_sublead * FF_qcd_ipcut_up / FF_qcd_ipcut_nom"
+    weight_down: "BDT_FF_score_QCD_sublead * FF_qcd_ipcut_down / FF_qcd_ipcut_nom"
+
 scans:
   - {pois: [r], points: 60, range: [0.8, 1.2]}
 
