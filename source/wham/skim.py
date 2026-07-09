@@ -167,9 +167,13 @@ def ensure_skims(
     required = cfg.required_columns()
     ff_sig = signature(cfg.fake_factors)
 
+    # skims are per sample file, independent of the process a Sample entry
+    # feeds (a genmatch-split sample appears once per process) — dedupe
+    unique = list({s.name: s for s in samples}.values())
+
     skims: dict[str, SkimInfo] = {}
     to_build: list[Sample] = []
-    for sample in samples:
+    for sample in unique:
         info = None if force else find_skim(cfg.name, sample, required, ff_sig)
         if info is None:
             to_build.append(sample)

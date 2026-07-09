@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 
 from wham.config import AnalysisConfig, Sample, VariableCfg, sample_scale
-from wham.expr import parse
+from wham.expr import parse, widened_arrow
 from wham.skim import SkimInfo, read_skim
 
 REGION_NOMINAL = "nominal"
@@ -71,11 +71,20 @@ class FillSpec:
     fitcp: tuple[tuple[str, str, tuple[tuple[str, str], ...], dict], ...] = ()
     # anti-iso fills with and without the FF weight (qcd.method=ff only)
     ffcheck: tuple[tuple[str, dict], ...] = ()
-    # weight-based shape variations filling the variation axis of the
-    # datamc/fitcp hists: (name, target, processes, weight_up, weight_down)
-    variations: tuple[tuple[str, str, tuple[str, ...], str, str], ...] = ()
+    # shape variations filling the variation axis of the datamc/fitcp hists:
+    # (name, target, processes, weight_up, weight_down, factors). weight/qcd_ff
+    # targets use weight_up/down (factors empty); a columns target carries
+    # ((column, factor), ...) — the listed processes are refilled with those
+    # columns scaled before cuts and observables are evaluated (weights None).
+    variations: tuple[
+        tuple[str, str, tuple[str, ...], str | None, str | None,
+              tuple[tuple[str, float], ...]], ...
+    ] = ()
     # variables whose source column differs from their name (alias -> column)
     var_columns: tuple[tuple[str, str], ...] = ()
+    # per-process extra selection (process -> cut expression), folded into the
+    # read filter of that process's samples (skipped where columns are absent)
+    process_cuts: tuple[tuple[str, str], ...] = ()
 
 
 def _axis(var: str, vcfg: dict):
@@ -92,7 +101,11 @@ def _axis(var: str, vcfg: dict):
 def variation_labels(spec: FillSpec, family: str) -> list[str]:
     labels = ["nominal"]
     if family in ("datamc", "fitcp"):
-        labels += [f"{name}_{d}" for name, *_ in spec.variations for d in ("up", "down")]
+        for name, target, *_ in spec.variations:
+            if target == "columns":
+                labels.append(name)  # one slice, named by the variation itself
+            else:
+                labels += [f"{name}_up", f"{name}_down"]
     return labels
 
 
@@ -202,11 +215,15 @@ def build_fill_spec(
         fitcp=fitcp,
         ffcheck=ffcheck,
         variations=tuple(
-            (v.name, v.target, tuple(v.processes), v.weight_up, v.weight_down)
+            (v.name, v.target, tuple(v.processes), v.weight_up, v.weight_down,
+             tuple(sorted(v.factors.items())))
             for v in cfg.variations
         ),
         var_columns=tuple(
             (v, vcfg.column) for v, vcfg in cfg.variables.items() if vcfg.column
+        ),
+        process_cuts=tuple(
+            (n, p.cut) for n, p in cfg.processes.items() if p.cut
         ),
     )
 
@@ -239,7 +256,10 @@ def spec_extras(spec: FillSpec) -> dict[HistKey, dict]:
         key = ("fitcp", var)
         extras.setdefault(key, {"components": {}})["components"][process] = dict(comps)
     if spec.variations:
-        payload = [list(v[:2]) + [list(v[2]), v[3], v[4]] for v in spec.variations]
+        # note: v[5] (the column factors) must stay in this cache-key payload —
+        # dropping it would serve stale histograms across morph grid changes
+        payload = [list(v[:2]) + [list(v[2]), v[3], v[4], [list(p) for p in v[5]]]
+                   for v in spec.variations]
         for var, _ in spec.datamc:
             extras.setdefault(("datamc", var), {})["variations"] = payload
         for var, _, _, _ in spec.fitcp:
@@ -287,12 +307,66 @@ class _Columns:
         return arr
 
 
+class _ShiftedColumns(_Columns):
+    """View of a _Columns with chosen columns scaled by constant factors:
+    the same events with shifted kinematics (one morph grid point). Scaled
+    arrays live in the view's own cache; other columns come from the base."""
+
+    def __init__(self, base: _Columns, factors: dict[str, float]):
+        self._base = base
+        self._factors = factors
+        self._cache: dict[str, np.ndarray] = {}
+        self.names = base.names
+
+    def get(self, name: str) -> np.ndarray:
+        factor = self._factors.get(name)
+        if factor is None:
+            return self._base.get(name)
+        arr = self._cache.get(name)
+        if arr is None:
+            arr = self._base.get(name) * factor
+            self._cache[name] = arr
+        return arr
+
+
 def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey, Any]:
     """Fill every requested histogram for one sample. Runs in a worker."""
     selection = parse(spec.selection)
     needed = set(skim.columns)  # read everything the skim has; it is already minimal
 
-    table = read_skim(skim, columns=sorted(needed), filter_expr=selection.arrow())
+    # per-process cut, pushed into the read filter when the skim carries its
+    # columns (so e.g. a genmatch cut is a no-op on data, which has no gen info)
+    process_cut = dict(spec.process_cuts).get(sample.process)
+    parsed_cut = None
+    if process_cut is not None:
+        candidate = parse(process_cut)
+        if candidate.columns <= needed:
+            parsed_cut = candidate
+
+    # columns variations targeting this sample scale columns before cuts are
+    # evaluated, so the read filter must be a superset over every grid point:
+    # widen it and re-apply the exact selection in memory (per grid point, on
+    # the scaled columns — events then migrate across selection edges)
+    scale_bounds: dict[str, tuple[float, float]] = {}
+    for _, target, procs, _, _, factors in spec.variations:
+        if target != "columns" or sample.kind != "mc" or sample.process not in procs:
+            continue
+        for col, factor in factors:
+            lo, hi = scale_bounds.get(col, (1.0, 1.0))
+            scale_bounds[col] = (min(lo, factor), max(hi, factor))
+
+    if scale_bounds:
+        filter_expr = widened_arrow(selection, scale_bounds)
+        if parsed_cut is not None:
+            cut_expr = widened_arrow(parsed_cut, scale_bounds)
+            if cut_expr is not None:
+                filter_expr = cut_expr if filter_expr is None else filter_expr & cut_expr
+    else:
+        filter_expr = selection.arrow()
+        if parsed_cut is not None:
+            filter_expr = filter_expr & parsed_cut.arrow()
+
+    table = read_skim(skim, columns=sorted(needed), filter_expr=filter_expr)
     cols = _Columns(table)
     n = table.num_rows
 
@@ -303,6 +377,32 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
         weights = cols.eval(spec.weight).astype(float) * scale
     else:
         weights = np.full(n, scale)
+
+    # ---- evaluation contexts: nominal + one per columns variation. Each has
+    # a (possibly scaled) column view and its own memoized region masks; under
+    # a widened read filter the exact selection is re-applied in memory, on
+    # the context's own columns (so scaled cuts migrate events)
+    class _Ctx:
+        def __init__(self, view: _Columns):
+            self.cols = view
+            self.parts: dict[str, np.ndarray | None] = {}
+            self.residual: np.ndarray | None = None
+            if scale_bounds:
+                mask = view.eval(spec.selection).astype(bool)
+                if parsed_cut is not None:
+                    mask = mask & view.eval(process_cut).astype(bool)
+                self.residual = mask
+
+    nominal_ctx = _Ctx(cols)
+
+    weight_cols = parse(spec.weight).columns if sample.kind != "data" else frozenset()
+
+    def ctx_weights(ctx: "_Ctx", factors: dict[str, float]) -> np.ndarray:
+        """Per-event weights in this context (re-derived only when the weight
+        expression touches a scaled column)."""
+        if weight_cols and weight_cols <= ctx.cols.names and weight_cols & set(factors):
+            return ctx.cols.eval(spec.weight).astype(float) * scale
+        return weights
 
     hists: dict[HistKey, Any] = {}
     colmap = dict(spec.var_columns)
@@ -325,29 +425,33 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
             weight=w[mask],
         )
 
-    def var_data(var: str, vcfg: dict) -> tuple[np.ndarray, np.ndarray] | None:
+    def var_data(ctx: "_Ctx", var: str, vcfg: dict) -> tuple[np.ndarray, np.ndarray] | None:
         """(values, valid_mask) for a plotted variable, or None if columns
-        are missing. Unrolled variables map (x, y) onto a unit index axis."""
+        are missing. Unrolled variables map (x, y) onto a unit index axis.
+        Read through the context, so scaled columns shift the values (and,
+        for unrolled variables, migrate events between index bins)."""
+        ccols = ctx.cols
         unroll = vcfg.get("unroll")
         if unroll is None:
             col = column(var)
-            if col not in cols:
+            if col not in ccols:
                 return None
-            return cols.get(col), cols.finite(col)
+            return ccols.get(col), ccols.finite(col)
         xcol, ycol = unroll["x_column"], unroll["y_column"]
-        if xcol not in cols or ycol not in cols:
+        if xcol not in ccols or ycol not in ccols:
             return None
         xe = np.asarray(unroll["x_edges"])
         ye = np.asarray(unroll["y_edges"])
-        ix = np.searchsorted(xe, cols.get(xcol), side="right") - 1
-        iy = np.searchsorted(ye, cols.get(ycol), side="right") - 1
+        ix = np.searchsorted(xe, ccols.get(xcol), side="right") - 1
+        iy = np.searchsorted(ye, ccols.get(ycol), side="right") - 1
         nx, ny = len(xe) - 1, len(ye) - 1
-        valid = (cols.finite(xcol) & cols.finite(ycol)
+        valid = (ccols.finite(xcol) & ccols.finite(ycol)
                  & (ix >= 0) & (ix < nx) & (iy >= 0) & (iy < ny))
         values = (ix + nx * iy).astype(float) + 0.5  # unit-axis bin centers
         return values, valid
 
-    # ---- resolution: derived variable
+    # ---- resolution: derived variable (nominal columns; the residual keeps
+    # a widened read filter from leaking out-of-selection rows in)
     for reco, ref, rescfg, refcfg in spec.resolution:
         reco_col, ref_col = column(reco), column(ref)
         if reco_col not in cols or ref_col not in cols:
@@ -356,6 +460,8 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
         is_angle = refcfg.get("kind") == "angle"
         relative = bool(rescfg.get("relative", True)) and not is_angle
         mask = cols.finite(reco_col) & cols.finite(ref_col)
+        if nominal_ctx.residual is not None:
+            mask = mask & nominal_ctx.residual
         if relative:
             mask = mask & (cv != 0)
             with np.errstate(divide="ignore", invalid="ignore"):
@@ -367,50 +473,51 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
         fill("resolution", resolution_name(reco, ref), rescfg,
              REGION_NOMINAL, res, mask, weights)
 
-    # ---- region inputs shared by datamc and fitcp (each evaluated at most once)
-    _parts: dict[str, np.ndarray | None] = {}
-
-    def region_part(name: str) -> np.ndarray | None:
+    # ---- region inputs shared by datamc and fitcp (memoized per context)
+    def region_part(ctx: "_Ctx", name: str) -> np.ndarray | None:
         """Boolean mask for trigger/os/iso/anti, or None if undefined/missing cols."""
-        if name not in _parts:
+        if name not in ctx.parts:
             src = {
                 "trigger": spec.trigger,
                 "os": spec.qcd_os,
                 "iso": spec.qcd_iso,
                 "anti": spec.qcd_antiiso,
             }[name]
-            if src is not None and parse(src).columns <= cols.names:
-                _parts[name] = cols.eval(src).astype(bool)
+            if src is not None and parse(src).columns <= ctx.cols.names:
+                ctx.parts[name] = ctx.cols.eval(src).astype(bool)
             else:
-                _parts[name] = None
-        return _parts[name]
+                ctx.parts[name] = None
+        return ctx.parts[name]
 
-    def base_mask() -> np.ndarray:
-        trig = region_part("trigger")
-        return trig if trig is not None else np.ones(n, dtype=bool)
+    def base_mask(ctx: "_Ctx") -> np.ndarray:
+        trig = region_part(ctx, "trigger")
+        base = trig if trig is not None else np.ones(n, dtype=bool)
+        if ctx.residual is not None:
+            base = base & ctx.residual
+        return base
 
-    def sr_mask() -> np.ndarray | None:
+    def sr_mask(ctx: "_Ctx") -> np.ndarray | None:
         """Signal region: trigger & OS (& iso for abcd/ff)."""
-        os_mask = region_part("os")
+        os_mask = region_part(ctx, "os")
         if os_mask is None:
             return None
-        sr = base_mask() & os_mask
+        sr = base_mask(ctx) & os_mask
         if spec.qcd_method in ("abcd", "ff"):
-            iso = region_part("iso")
+            iso = region_part(ctx, "iso")
             if iso is None:
                 return None
             sr = sr & iso
         return sr
 
     # ---- datamc: trigger x charge x isolation regions (mask, weights) each
-    def datamc_region_fills(w: np.ndarray) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-        os_mask = region_part("os")
+    def datamc_region_fills(ctx: "_Ctx", w: np.ndarray) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+        os_mask = region_part(ctx, "os")
         if os_mask is None:
             return {}
-        base = base_mask()
+        base = base_mask(ctx)
         if spec.qcd_method == "abcd":
-            iso = region_part("iso")
-            anti = region_part("anti")
+            iso = region_part(ctx, "iso")
+            anti = region_part(ctx, "anti")
             if iso is None or anti is None:
                 return {}
             return {
@@ -420,23 +527,23 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
                 "SS_antiiso": (base & ~os_mask & anti, w),
             }
         if spec.qcd_method == "ff":
-            iso = region_part("iso")
-            anti = region_part("anti")
+            iso = region_part(ctx, "iso")
+            anti = region_part(ctx, "anti")
             if iso is None or anti is None:
                 return {}
             out = {"OS_iso": (base & os_mask & iso, w)}
             # anti-iso entries carry the per-event fake-factor weight
-            if parse(spec.qcd_ff_weight).columns <= cols.names:
+            if parse(spec.qcd_ff_weight).columns <= ctx.cols.names:
                 out["OS_antiiso"] = (
                     base & os_mask & anti,
-                    w * cols.eval(spec.qcd_ff_weight).astype(float),
+                    w * ctx.cols.eval(spec.qcd_ff_weight).astype(float),
                 )
             return out
         return {"OS": (base & os_mask, w), "SS": (base & ~os_mask, w)}
 
-    def fill_datamc(region_fills: dict, variation: str = "nominal") -> None:
+    def fill_datamc(ctx: "_Ctx", region_fills: dict, variation: str = "nominal") -> None:
         for var, vcfg in spec.datamc:
-            data = var_data(var, vcfg)
+            data = var_data(ctx, var, vcfg)
             if data is None:
                 continue
             values, valid = data
@@ -444,18 +551,18 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
                 fill("datamc", var, vcfg, region, values, rmask & valid, w, variation)
 
     if spec.datamc:
-        fill_datamc(datamc_region_fills(weights))
+        fill_datamc(nominal_ctx, datamc_region_fills(nominal_ctx, weights))
 
     # ---- ffcheck: anti-iso fills with and without the per-event FF weight
     if spec.ffcheck and spec.qcd_ff_weight is not None:
-        os_mask = region_part("os")
-        anti = region_part("anti")
+        os_mask = region_part(nominal_ctx, "os")
+        anti = region_part(nominal_ctx, "anti")
         if (os_mask is not None and anti is not None
                 and parse(spec.qcd_ff_weight).columns <= cols.names):
-            amask = base_mask() & os_mask & anti
+            amask = base_mask(nominal_ctx) & os_mask & anti
             ff_w = weights * cols.eval(spec.qcd_ff_weight).astype(float)
             for var, vcfg in spec.ffcheck:
-                data = var_data(var, vcfg)
+                data = var_data(nominal_ctx, var, vcfg)
                 if data is None:
                     continue
                 values, valid = data
@@ -466,39 +573,56 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
     # ---- cp: even/odd CP weights (MC only)
     if sample.kind != "data":
         for var, even_col, odd_col, vcfg in spec.cp:
-            data = var_data(var, vcfg)
+            data = var_data(nominal_ctx, var, vcfg)
             if data is None or even_col not in cols or odd_col not in cols:
                 continue
             values, valid = data
+            if nominal_ctx.residual is not None:
+                valid = valid & nominal_ctx.residual
             fill("cp", var, vcfg, "even", values, valid, weights * cols.get(even_col))
             fill("cp", var, vcfg, "odd", values, valid, weights * cols.get(odd_col))
 
     # ---- fitcp: weighted fit templates in the signal region, per process
-    def fill_fitcp(base_weights: np.ndarray, variation: str = "nominal") -> None:
-        sr = sr_mask()
+    def fill_fitcp(ctx: "_Ctx", base_weights: np.ndarray,
+                   variation: str = "nominal") -> None:
+        sr = sr_mask(ctx)
         if sr is None:
             return
         for var, process, comps, vcfg in spec.fitcp:
             if process != sample.process:
                 continue
-            data = var_data(var, vcfg)
+            data = var_data(ctx, var, vcfg)
             if data is None:
                 continue
             values, valid = data
             mask = sr & valid
             for comp, weight_expr in comps:
-                if not parse(weight_expr).columns <= cols.names:
+                if not parse(weight_expr).columns <= ctx.cols.names:
                     continue
                 fill("fitcp", var, vcfg, comp, values, mask,
-                     base_weights * cols.eval(weight_expr).astype(float), variation)
+                     base_weights * ctx.cols.eval(weight_expr).astype(float), variation)
 
     if spec.fitcp and sample.kind != "data":
-        fill_fitcp(weights)
+        fill_fitcp(nominal_ctx, weights)
 
     # ---- shape variations: refill matched processes with the replacement
-    # weight (target=weight), or refill every sample's anti-iso entries with
-    # the varied fake-factor weight (target=qcd_ff)
-    for name, target, procs, w_up, w_dn in spec.variations:
+    # weight (target=weight), with scaled columns (target=columns), or refill
+    # every sample's anti-iso entries with the varied FF weight (target=qcd_ff)
+    for name, target, procs, w_up, w_dn, factors in spec.variations:
+        if target == "columns":
+            # one slice: re-evaluate the matched MC processes' fills with the
+            # listed columns scaled — the selection residual, region masks,
+            # observables and (if touched) weights all shift together
+            if sample.kind != "mc" or sample.process not in procs:
+                continue
+            fdict = dict(factors)
+            ctx = _Ctx(_ShiftedColumns(cols, fdict))
+            w = ctx_weights(ctx, fdict)
+            if spec.datamc:
+                fill_datamc(ctx, datamc_region_fills(ctx, w), variation=name)
+            if spec.fitcp:
+                fill_fitcp(ctx, w, variation=name)
+            continue
         for direction, weight_expr in (("up", w_up), ("down", w_dn)):
             label = f"{name}_{direction}"
             if not parse(weight_expr).columns <= cols.names:
@@ -508,18 +632,19 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
                     continue
                 vweights = cols.eval(weight_expr).astype(float) * scale
                 if spec.datamc:
-                    fill_datamc(datamc_region_fills(vweights), variation=label)
+                    fill_datamc(nominal_ctx, datamc_region_fills(nominal_ctx, vweights),
+                                variation=label)
                 if spec.fitcp:
-                    fill_fitcp(vweights, variation=label)
+                    fill_fitcp(nominal_ctx, vweights, variation=label)
             elif target == "qcd_ff" and spec.qcd_method == "ff" and spec.datamc:
-                os_mask = region_part("os")
-                anti = region_part("anti")
+                os_mask = region_part(nominal_ctx, "os")
+                anti = region_part(nominal_ctx, "anti")
                 if os_mask is None or anti is None:
                     continue
-                amask = base_mask() & os_mask & anti
+                amask = base_mask(nominal_ctx) & os_mask & anti
                 vw = weights * cols.eval(weight_expr).astype(float)
                 for var, vcfg in spec.datamc:
-                    data = var_data(var, vcfg)
+                    data = var_data(nominal_ctx, var, vcfg)
                     if data is None:
                         continue
                     values, valid = data
@@ -545,15 +670,16 @@ def complete_variation_slices(spec: FillSpec, hists: dict[HistKey, Any]) -> None
         procs = list(h.axes["process"])
         view = h.view()
         nom = labels.index("nominal")
-        for name, target, varied_procs, _, _ in spec.variations:
-            for d in ("up", "down"):
-                label = f"{name}_{d}"
+        for name, target, varied_procs, _, _, _ in spec.variations:
+            slice_labels = ([name] if target == "columns"
+                            else [f"{name}_up", f"{name}_down"])
+            for label in slice_labels:
                 if label not in labels:
                     continue
                 vi = labels.index(label)
                 for pi, proc in enumerate(procs):
                     for ri, region in enumerate(regions):
-                        if target == "weight":
+                        if target in ("weight", "columns"):
                             varied = proc in varied_procs
                         else:  # qcd_ff varies every sample's anti-iso entries
                             varied = family == "datamc" and region == "OS_antiiso"

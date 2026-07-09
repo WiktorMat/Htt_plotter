@@ -211,6 +211,131 @@ class Expr:
         return eval(code, {"__builtins__": {}, "abs": np.abs}, dict(cols))
 
 
+def conjuncts(expr: Expr) -> list[ast.expr]:
+    """The top-level AND atoms of an expression (an OR-group is one atom)."""
+    out: list[ast.expr] = []
+
+    def walk(node: ast.expr) -> None:
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitAnd):
+            walk(node.left)
+            walk(node.right)
+        else:
+            out.append(node)
+
+    walk(expr.tree.body)
+    return out
+
+
+def _atom_columns(atom: ast.expr) -> set[str]:
+    cols: set[str] = set()
+    _validate("<atom>", atom, cols)
+    return cols
+
+
+def _const_value(node: ast.expr) -> float | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return float(node.value)
+    if (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub)
+            and isinstance(node.operand, ast.Constant)
+            and isinstance(node.operand.value, (int, float))):
+        return -float(node.operand.value)
+    return None
+
+
+def _scaled_operand(node: ast.expr) -> str | None:
+    """Column of a scale-covariant comparison side: a bare column or abs(col)
+    (abs(s*x) == s*abs(x) for the positive factors used here)."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == "abs" and len(node.args) == 1
+            and isinstance(node.args[0], ast.Name)):
+        return node.args[0].id
+    return None
+
+
+_MIRROR_CMP = {ast.Lt: ast.Gt, ast.LtE: ast.GtE, ast.Gt: ast.Lt, ast.GtE: ast.LtE}
+
+
+def _widen_atom(atom: ast.expr, bounds: Mapping[str, tuple[float, float]]) -> ast.expr | None:
+    """A relaxed copy of `column <op> constant` such that the cut passes for
+    every scaling of the column within its bounds, or None if the atom's
+    shape can't be relaxed (it must then be re-applied in memory)."""
+    if not isinstance(atom, ast.Compare):
+        return None
+    left, op, right = atom.left, atom.ops[0], atom.comparators[0]
+    operand, col, const = left, _scaled_operand(left), _const_value(right)
+    if col is None or const is None:  # try the mirrored orientation
+        operand, col, const = right, _scaled_operand(right), _const_value(left)
+        mirrored = _MIRROR_CMP.get(type(op))
+        if col is None or const is None or mirrored is None:
+            return None
+        op = mirrored()
+    smin, smax = bounds[col]
+    if smin <= 0:
+        return None
+    if isinstance(op, (ast.Gt, ast.GtE)):  # s*x > c <=> x > c/s; loosest bound
+        relaxed = const / (smax if const >= 0 else smin)
+    elif isinstance(op, (ast.Lt, ast.LtE)):
+        relaxed = const / (smin if const >= 0 else smax)
+    else:  # ==/!= have no useful relaxation
+        return None
+    # reuse the operand node so an abs() wrapper survives the rewrite
+    return ast.Compare(left=operand, ops=[op],
+                       comparators=[ast.Constant(value=relaxed)])
+
+
+def column_bounds(expr: Expr, column: str) -> tuple[float | None, float | None]:
+    """(lo, hi) window a conjunction of simple comparisons puts on a column
+    (e.g. the pt window of a category cut); None for an unbounded side."""
+    lo: float | None = None
+    hi: float | None = None
+    for atom in conjuncts(expr):
+        if not isinstance(atom, ast.Compare):
+            continue
+        left, op, right = atom.left, atom.ops[0], atom.comparators[0]
+        col, const = _scaled_operand(left), _const_value(right)
+        if col is None or const is None:
+            col, const = _scaled_operand(right), _const_value(left)
+            mirrored = _MIRROR_CMP.get(type(op))
+            if col is None or const is None or mirrored is None:
+                continue
+            op = mirrored()
+        if col != column:
+            continue
+        if isinstance(op, (ast.Gt, ast.GtE)):
+            lo = const if lo is None else max(lo, const)
+        elif isinstance(op, (ast.Lt, ast.LtE)):
+            hi = const if hi is None else min(hi, const)
+    return lo, hi
+
+
+def widened_arrow(expr: Expr, bounds: Mapping[str, tuple[float, float]]):
+    """A read-filter superset of the expression under column scaling.
+
+    `bounds` maps column -> (smin, smax), the extreme constant factors the
+    column may be multiplied by before the cut is evaluated (include 1.0 for
+    the nominal evaluation). Atoms not touching a scaled column pass through
+    exactly; simple comparisons on a scaled column are relaxed so every
+    scaled evaluation still reads its events; anything else on a scaled
+    column is dropped. The exact cut MUST be re-applied in memory. Returns a
+    pyarrow dataset Expression, or None when every atom was dropped."""
+    kept = []
+    for atom in conjuncts(expr):
+        if not (_atom_columns(atom) & set(bounds)):
+            kept.append(atom)
+            continue
+        widened = _widen_atom(atom, bounds)
+        if widened is not None:
+            kept.append(widened)
+    if not kept:
+        return None
+    out = _to_arrow(kept[0])
+    for atom in kept[1:]:
+        out = out & _to_arrow(atom)
+    return out
+
+
 @lru_cache(maxsize=256)
 def parse(source: str) -> Expr:
     source = source.strip()

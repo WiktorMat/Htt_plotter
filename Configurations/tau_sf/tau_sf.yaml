@@ -1,0 +1,134 @@
+# wham fit config — tau_h ID (PNet VSjet VVTight) + ES scale factors.
+# 4 PNet decay modes x 5 pT bins = 20 categories on m_vis.
+#   ID SF: a free per-(DM,pT) POI tid_SF_* scaling the genuine-tau rate.
+#   TES:   a per-DM continuous morphing POI tes_dm* over a 21-point m_vis*sqrt(f)
+#          grid (RooMomentMorph). autoMCStats is auto-disabled (incompatible with
+#          the external morph pdf).
+# Run:  wham fit Configurations/tau_sf/tau_sf.yaml
+
+name: tau_sf
+analysis: mutau_tauSF_2024.yaml      # sibling in this directory
+
+# --- categories: DM split x pT bins (cut = PNet DM quality cut & pT window) ---
+categories:
+  - {name: dm0_pt1,  variable: m_vis, cut: "decayModePNet_2 == 0 & ip_LengthSig_2 >= 1.25 & pt_2 >= 20 & pt_2 < 30"}
+  - {name: dm0_pt2,  variable: m_vis, cut: "decayModePNet_2 == 0 & ip_LengthSig_2 >= 1.25 & pt_2 >= 30 & pt_2 < 40"}
+  - {name: dm0_pt3,  variable: m_vis, cut: "decayModePNet_2 == 0 & ip_LengthSig_2 >= 1.25 & pt_2 >= 40 & pt_2 < 50"}
+  - {name: dm0_pt4,  variable: m_vis, cut: "decayModePNet_2 == 0 & ip_LengthSig_2 >= 1.25 & pt_2 >= 50 & pt_2 < 60"}
+  - {name: dm0_pt5,  variable: m_vis, cut: "decayModePNet_2 == 0 & ip_LengthSig_2 >= 1.25 & pt_2 >= 60 & pt_2 < 200"}
+  - {name: dm1_pt1,  variable: m_vis, cut: "decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15 & pt_2 >= 20 & pt_2 < 30"}
+  - {name: dm1_pt2,  variable: m_vis, cut: "decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15 & pt_2 >= 30 & pt_2 < 40"}
+  - {name: dm1_pt3,  variable: m_vis, cut: "decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15 & pt_2 >= 40 & pt_2 < 50"}
+  - {name: dm1_pt4,  variable: m_vis, cut: "decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15 & pt_2 >= 50 & pt_2 < 60"}
+  - {name: dm1_pt5,  variable: m_vis, cut: "decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15 & pt_2 >= 60 & pt_2 < 200"}
+  - {name: dm2_pt1,  variable: m_vis, cut: "decayMode_2 == 1 & decayModePNet_2 == 2 & pion_E_split_2 > 0.15 & pt_2 >= 20 & pt_2 < 30"}
+  - {name: dm2_pt2,  variable: m_vis, cut: "decayMode_2 == 1 & decayModePNet_2 == 2 & pion_E_split_2 > 0.15 & pt_2 >= 30 & pt_2 < 40"}
+  - {name: dm2_pt3,  variable: m_vis, cut: "decayMode_2 == 1 & decayModePNet_2 == 2 & pion_E_split_2 > 0.15 & pt_2 >= 40 & pt_2 < 50"}
+  - {name: dm2_pt4,  variable: m_vis, cut: "decayMode_2 == 1 & decayModePNet_2 == 2 & pion_E_split_2 > 0.15 & pt_2 >= 50 & pt_2 < 60"}
+  - {name: dm2_pt5,  variable: m_vis, cut: "decayMode_2 == 1 & decayModePNet_2 == 2 & pion_E_split_2 > 0.15 & pt_2 >= 60 & pt_2 < 200"}
+  - {name: dm10_pt1, variable: m_vis, cut: "decayModePNet_2 == 10 & hasRefitSV_2 & pt_2 >= 20 & pt_2 < 30"}
+  - {name: dm10_pt2, variable: m_vis, cut: "decayModePNet_2 == 10 & hasRefitSV_2 & pt_2 >= 30 & pt_2 < 40"}
+  - {name: dm10_pt3, variable: m_vis, cut: "decayModePNet_2 == 10 & hasRefitSV_2 & pt_2 >= 40 & pt_2 < 50"}
+  - {name: dm10_pt4, variable: m_vis, cut: "decayModePNet_2 == 10 & hasRefitSV_2 & pt_2 >= 50 & pt_2 < 60"}
+  - {name: dm10_pt5, variable: m_vis, cut: "decayModePNet_2 == 10 & hasRefitSV_2 & pt_2 >= 60 & pt_2 < 200"}
+
+model:
+  # ID SF: one free POI per (DM, pT) bin
+  pois:
+    tid_SF_dm0_pt1:  {init: 1, range: [0, 3]}
+    tid_SF_dm0_pt2:  {init: 1, range: [0, 3]}
+    tid_SF_dm0_pt3:  {init: 1, range: [0, 3]}
+    tid_SF_dm0_pt4:  {init: 1, range: [0, 3]}
+    tid_SF_dm0_pt5:  {init: 1, range: [0, 3]}
+    tid_SF_dm1_pt1:  {init: 1, range: [0, 3]}
+    tid_SF_dm1_pt2:  {init: 1, range: [0, 3]}
+    tid_SF_dm1_pt3:  {init: 1, range: [0, 3]}
+    tid_SF_dm1_pt4:  {init: 1, range: [0, 3]}
+    tid_SF_dm1_pt5:  {init: 1, range: [0, 3]}
+    tid_SF_dm2_pt1:  {init: 1, range: [0, 3]}
+    tid_SF_dm2_pt2:  {init: 1, range: [0, 3]}
+    tid_SF_dm2_pt3:  {init: 1, range: [0, 3]}
+    tid_SF_dm2_pt4:  {init: 1, range: [0, 3]}
+    tid_SF_dm2_pt5:  {init: 1, range: [0, 3]}
+    tid_SF_dm10_pt1: {init: 1, range: [0, 3]}
+    tid_SF_dm10_pt2: {init: 1, range: [0, 3]}
+    tid_SF_dm10_pt3: {init: 1, range: [0, 3]}
+    tid_SF_dm10_pt4: {init: 1, range: [0, 3]}
+    tid_SF_dm10_pt5: {init: 1, range: [0, 3]}
+
+  processes:
+    # genuine-tau rate scaled per bin by its ID SF POI (the measurement)
+    DY_genuine:
+      scale:
+        dm0_pt1:  tid_SF_dm0_pt1
+        dm0_pt2:  tid_SF_dm0_pt2
+        dm0_pt3:  tid_SF_dm0_pt3
+        dm0_pt4:  tid_SF_dm0_pt4
+        dm0_pt5:  tid_SF_dm0_pt5
+        dm1_pt1:  tid_SF_dm1_pt1
+        dm1_pt2:  tid_SF_dm1_pt2
+        dm1_pt3:  tid_SF_dm1_pt3
+        dm1_pt4:  tid_SF_dm1_pt4
+        dm1_pt5:  tid_SF_dm1_pt5
+        dm2_pt1:  tid_SF_dm2_pt1
+        dm2_pt2:  tid_SF_dm2_pt2
+        dm2_pt3:  tid_SF_dm2_pt3
+        dm2_pt4:  tid_SF_dm2_pt4
+        dm2_pt5:  tid_SF_dm2_pt5
+        dm10_pt1: tid_SF_dm10_pt1
+        dm10_pt2: tid_SF_dm10_pt2
+        dm10_pt3: tid_SF_dm10_pt3
+        dm10_pt4: tid_SF_dm10_pt4
+        dm10_pt5: tid_SF_dm10_pt5
+
+  # TES: one continuous morphing POI per DM, correlated across its pT bins.
+  # Grid f in [0.95,1.05] step 0.005 (21 points); observable scaled by sqrt(f).
+  morphs:
+    tes_dm0:
+      process: DY_genuine
+      grid: {from: 0.95, to: 1.05, step: 0.005}
+      categories: [dm0_pt1, dm0_pt2, dm0_pt3, dm0_pt4, dm0_pt5]
+      scales: {m_vis: sqrt, pt_2: linear}
+      init: 1.0
+      range: [0.95, 1.05]
+    tes_dm1:
+      process: DY_genuine
+      grid: {from: 0.95, to: 1.05, step: 0.005}
+      categories: [dm1_pt1, dm1_pt2, dm1_pt3, dm1_pt4, dm1_pt5]
+      scales: {m_vis: sqrt, pt_2: linear}
+      init: 1.0
+      range: [0.95, 1.05]
+    tes_dm2:
+      process: DY_genuine
+      grid: {from: 0.95, to: 1.05, step: 0.005}
+      categories: [dm2_pt1, dm2_pt2, dm2_pt3, dm2_pt4, dm2_pt5]
+      scales: {m_vis: sqrt, pt_2: linear}
+      init: 1.0
+      range: [0.95, 1.05]
+    tes_dm10:
+      process: DY_genuine
+      grid: {from: 0.95, to: 1.05, step: 0.005}
+      categories: [dm10_pt1, dm10_pt2, dm10_pt3, dm10_pt4, dm10_pt5]
+      scales: {m_vis: sqrt, pt_2: linear}
+      init: 1.0
+      range: [0.95, 1.05]
+
+systematics:
+  - {name: lumi_13p6TeV, effect: lnN, processes: [tt, dibosons, "W+jets", DY_lfake, DY_genuine], scaleFactor: 1.025}
+  - {name: xsec_tt,  effect: lnN, processes: [tt],        scaleFactor: 1.05}
+  - {name: xsec_vv,  effect: lnN, processes: [dibosons],  scaleFactor: 1.06}
+  - {name: xsec_w,   effect: lnN, processes: ["W+jets"],  scaleFactor: 1.05}
+  - {name: xsec_dy,  effect: lnN, processes: [DY_lfake],  scaleFactor: 1.02}
+  - {name: norm_qcd, effect: rateParam, processes: [QCD], range: [0.1, 5]}
+
+# Headline scans: the per-DM TES (the ID SFs come out of FitDiagnostics).
+scans:
+  - {pois: [tes_dm0],  points: 15}
+  - {pois: [tes_dm1],  points: 15}
+  - {pois: [tes_dm2],  points: 15}
+  - {pois: [tes_dm10], points: 15}
+
+# Validate the machinery on Asimov first (truth = POI inits: SF=1, TES=1.0);
+# flip to false to fit observed data.
+asimov:
+  enabled: true

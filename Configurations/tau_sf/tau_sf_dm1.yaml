@@ -1,0 +1,81 @@
+# tau_h ID + ES SF -- PNet decay mode dm1 (1 datacard, independent fit).
+# tid_SF per pT bin; one tes_dm1 correlated across pT. 2D (tid_SF, tes) contours.
+# Run:  wham fit Configurations/tau_sf/tau_sf_dm1.yaml --workers 8
+name: tau_sf_dm1
+analysis: mutau_tauSF_2024.yaml
+
+categories:
+  - {name: dm1_pt1, variable: m_vis, cut: "decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15 & pt_2 >= 20 & pt_2 < 30"}
+  - {name: dm1_pt2, variable: m_vis, cut: "decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15 & pt_2 >= 30 & pt_2 < 40"}
+  - {name: dm1_pt3, variable: m_vis, cut: "decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15 & pt_2 >= 40 & pt_2 < 50"}
+  - {name: dm1_pt4, variable: m_vis, cut: "decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15 & pt_2 >= 50 & pt_2 < 60"}
+  - {name: dm1_pt5, variable: m_vis, cut: "decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15 & pt_2 >= 60 & pt_2 < 200"}
+
+model:
+  pois:
+    tid_SF_dm1_pt1: {init: 1, range: [0, 3]}
+    tid_SF_dm1_pt2: {init: 1, range: [0, 3]}
+    tid_SF_dm1_pt3: {init: 1, range: [0, 3]}
+    tid_SF_dm1_pt4: {init: 1, range: [0, 3]}
+    tid_SF_dm1_pt5: {init: 1, range: [0, 3]}
+  processes:
+    DY_genuine:
+      scale:
+        dm1_pt1: tid_SF_dm1_pt1
+        dm1_pt2: tid_SF_dm1_pt2
+        dm1_pt3: tid_SF_dm1_pt3
+        dm1_pt4: tid_SF_dm1_pt4
+        dm1_pt5: tid_SF_dm1_pt5
+  morphs:
+    tes_dm1:
+      process: DY_genuine
+      grid: {from: 0.95, to: 1.05, step: 0.005}
+      categories: [dm1_pt1, dm1_pt2, dm1_pt3, dm1_pt4, dm1_pt5]
+      scales: {m_vis: sqrt, pt_2: linear}
+      init: 1.0
+      range: [0.95, 1.05]
+
+systematics:
+  - {name: lumi_13p6TeV, effect: lnN, processes: [DY_genuine, DY_lfake, DY_jfake, "tt*", "W*", dibosons], scaleFactor: 1.025}
+  - {name: eff_m,        effect: lnN, processes: [DY_genuine, DY_lfake, DY_jfake, "tt*", "W*", dibosons], scaleFactor: 1.02}
+  - {name: muonFakerate, effect: lnN, processes: [DY_lfake, tt_lfake], scaleFactor: 1.50}
+  - {name: xsec_dy,      effect: lnN, processes: [DY_lfake, DY_jfake], scaleFactor: 1.02}
+  - {name: xsec_tt,      effect: lnN, processes: ["tt*"],      scaleFactor: 1.06}
+  - {name: xsec_vv,      effect: lnN, processes: [dibosons],   scaleFactor: 1.05}
+  - {name: norm_wj,      effect: lnN, processes: ["W*"],       scaleFactor: 1.08}
+  - {name: norm_qcd,     effect: lnN, processes: [QCD],        scaleFactor: 1.20}
+  - {name: rate_jTauFake_dm1_pt1, effect: lnN, processes: [QCD, W_jfake, DY_jfake, tt_jfake], categories: [dm1_pt1], scaleFactor: 1.15}
+  - {name: rate_jTauFake_dm1_pt2, effect: lnN, processes: [QCD, W_jfake, DY_jfake, tt_jfake], categories: [dm1_pt2], scaleFactor: 1.15}
+  - {name: rate_jTauFake_dm1_pt3, effect: lnN, processes: [QCD, W_jfake, DY_jfake, tt_jfake], categories: [dm1_pt3], scaleFactor: 1.15}
+  - {name: rate_jTauFake_dm1_pt4, effect: lnN, processes: [QCD, W_jfake, DY_jfake, tt_jfake], categories: [dm1_pt4], scaleFactor: 1.15}
+  - {name: rate_jTauFake_dm1_pt5, effect: lnN, processes: [QCD, W_jfake, DY_jfake, tt_jfake], categories: [dm1_pt5], scaleFactor: 1.15}
+  # fake-tau energy scales (TauFW corrTES convention): refill the fake
+  # components with pt_2*(1+-s) and m_vis*sqrt(1+-s), selection re-applied on
+  # the shifted values (migration included). DEcorrelated per pT bin like
+  # TauFW's shape_{m,j}TauFake_DMX_ptY: the bins pull in opposite directions,
+  # and one correlated shift trades the tension against TES (bimodal valley)
+  - {name: ltf_dm1_pt1, effect: shape, processes: [DY_lfake, tt_lfake], categories: [dm1_pt1], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.03}
+  - {name: ltf_dm1_pt2, effect: shape, processes: [DY_lfake, tt_lfake], categories: [dm1_pt2], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.03}
+  - {name: ltf_dm1_pt3, effect: shape, processes: [DY_lfake, tt_lfake], categories: [dm1_pt3], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.03}
+  - {name: ltf_dm1_pt4, effect: shape, processes: [DY_lfake, tt_lfake], categories: [dm1_pt4], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.03}
+  - {name: ltf_dm1_pt5, effect: shape, processes: [DY_lfake, tt_lfake], categories: [dm1_pt5], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.03}
+  - {name: jtf_dm1_pt1, effect: shape, processes: [DY_jfake, tt_jfake, W_jfake], categories: [dm1_pt1], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.10}
+  - {name: jtf_dm1_pt2, effect: shape, processes: [DY_jfake, tt_jfake, W_jfake], categories: [dm1_pt2], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.10}
+  - {name: jtf_dm1_pt3, effect: shape, processes: [DY_jfake, tt_jfake, W_jfake], categories: [dm1_pt3], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.10}
+  - {name: jtf_dm1_pt4, effect: shape, processes: [DY_jfake, tt_jfake, W_jfake], categories: [dm1_pt4], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.10}
+  - {name: jtf_dm1_pt5, effect: shape, processes: [DY_jfake, tt_jfake, W_jfake], categories: [dm1_pt5], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.10}
+
+scans:
+  - {pois: [tes_dm1], points: 20}
+  - {pois: [tid_SF_dm1_pt1, tes_dm1], points: 11}
+  - {pois: [tid_SF_dm1_pt2, tes_dm1], points: 11}
+  - {pois: [tid_SF_dm1_pt3, tes_dm1], points: 11}
+  - {pois: [tid_SF_dm1_pt4, tes_dm1], points: 11}
+  - {pois: [tid_SF_dm1_pt5, tes_dm1], points: 11}
+
+asimov:
+  enabled: false
+
+# TES morph -> CombineHarvester/cmsenv backend (CMSHistFunc morph + autoMCStats).
+combine:
+  cmssw: /afs/cern.ch/user/h/haawedik/CMSSW_14_1_0_pre4

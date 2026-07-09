@@ -58,11 +58,12 @@ def test_config_rejections(workspace: dict, patch: str, match: str) -> None:
 
 
 def test_ambiguous_pattern_rejected(workspace: dict) -> None:
+    # overlapping patterns without per-process cuts double count -> error
     base = workspace["yaml"].read_text()
     bad = workspace["tmp"] / "ambig.yaml"
     bad.write_text(base.replace('TT:   {samples: ["TT_*"]', 'TT:   {samples: ["*_test"]'))
     cfg = load_config(bad)
-    with pytest.raises(ValueError, match="matches both"):
+    with pytest.raises(ValueError, match="requires a disjoint 'cut'"):
         discover_samples(cfg)
 
 
@@ -148,3 +149,26 @@ def test_params_side_file(workspace: dict) -> None:
     cfg = load_config(side_dir / "analysis.yaml")
     assert cfg.lumi == 1000.0  # analysis yaml wins, side-file lumi ignored
     assert cfg.sample_params["TT_test"].xs == 100.0
+
+
+def test_shared_sample_needs_cuts(workspace: dict) -> None:
+    """One sample may feed several processes only when every one has a cut
+    (a genmatch split); without cuts the overlap double counts."""
+    from wham.config import discover_samples, load_config
+
+    cfg = load_config(workspace["yaml"])
+    procs = dict(cfg.processes)
+    procs["DY_lo"] = procs["DY"].model_copy(update={"cut": "id_2 < 4"})
+    procs["DY_hi"] = procs["DY"].model_copy(update={"cut": "id_2 >= 4"})
+    del procs["DY"]
+
+    split = cfg.model_copy(update={"processes": procs})
+    samples, _ = discover_samples(split)
+    dy = [s for s in samples if s.name == "DY_test"]
+    assert sorted(s.process for s in dy) == ["DY_hi", "DY_lo"]
+    assert all(s.kind == "mc" for s in dy)
+
+    # same overlap without a cut on one side -> config error
+    procs["DY_hi"] = procs["DY_hi"].model_copy(update={"cut": None})
+    with pytest.raises(ValueError, match="requires a disjoint 'cut'"):
+        discover_samples(cfg.model_copy(update={"processes": procs}))

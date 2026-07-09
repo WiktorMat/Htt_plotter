@@ -497,5 +497,33 @@ def fit(config: str, workers: int, no_cache: bool,
     )
 
 
+@main.command()
+@click.argument("configs", nargs=-1, required=True)
+@click.option("--var", default="pt_2", show_default=True,
+              help="Variable whose category-cut window sets the x axis.")
+@click.option("--label", default=None,
+              help="Annotation text, e.g. the VSjet working point.")
+def fitsummary(configs: tuple[str, ...], var: str, label: str | None) -> None:
+    """Overlay the POIs of several finished fits on one canvas: per-category
+    rate POIs vs their VAR windows (e.g. ID SFs vs pT, one series per decay
+    mode) + the morph POIs (TES) per fit. Reads existing fit outputs only —
+    run `wham fit` for each config first."""
+    from wham.fitconfig import load_fit_config, resolve_fit_config
+    from wham.render.fit import render_fit_summary
+
+    entries = []
+    for c in configs:
+        try:
+            fit_cfg, base_cfg = load_fit_config(resolve_fit_config(c))
+        except (ValueError, FileNotFoundError) as e:
+            console.print(f"[red bold]Config error[/red bold] ({c}): {e}")
+            sys.exit(1)
+        fitdir = base_cfg.resolved_output_dir() / "fit" / fit_cfg.name
+        entries.append((fit_cfg, base_cfg, fitdir))
+
+    outdir = entries[0][1].resolved_output_dir() / "fit"
+    render_fit_summary(entries, outdir, var, label, console)
+
+
 if __name__ == "__main__":
     main()

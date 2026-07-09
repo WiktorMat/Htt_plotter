@@ -1,27 +1,35 @@
 DYto2Mu_MLL_50_0J_amcatnloFXFX:
-  eff: 186095979
+  eff: 164095711
   filter_efficiency: 1.0
-  xs: 1664.6841730883225
+  xs: 2094.2000000000003
 DYto2Mu_MLL_50_1J_amcatnloFXFX:
-  eff: 93808736
+  eff: 164095711
   filter_efficiency: 1.0
-  xs: 316.2403378778898
+  xs: 2094.2000000000003
 DYto2Mu_MLL_50_2J_amcatnloFXFX:
-  eff: 43450815
+  eff: 164095711
   filter_efficiency: 1.0
-  xs: 116.47203023117962
+  xs: 2094.2000000000003
+DYto2Mu_MLL_50_amcatnloFXFX:
+  eff: 164095711
+  filter_efficiency: 1.0
+  xs: 2094.2000000000003
 DYto2Tau_MLL_50_0J_amcatnloFXFX:
-  eff: 197090067
+  eff: 116466835
   filter_efficiency: 1.0
-  xs: 1664.6841730883225
+  xs: 2094.2000000000003
 DYto2Tau_MLL_50_1J_amcatnloFXFX:
-  eff: 99407527
+  eff: 116466835
   filter_efficiency: 1.0
-  xs: 316.2403378778898
+  xs: 2094.2000000000003
 DYto2Tau_MLL_50_2J_amcatnloFXFX:
-  eff: 35294184
+  eff: 116466835
   filter_efficiency: 1.0
-  xs: 116.47203023117962
+  xs: 2094.2000000000003
+DYto2Tau_MLL_50_amcatnloFXFX:
+  eff: 116466835
+  filter_efficiency: 1.0
+  xs: 2094.2000000000003
 ST_tW_antitop_2L2Nu:
   eff: 7501499
   filter_efficiency: 1.0

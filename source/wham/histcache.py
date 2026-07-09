@@ -47,7 +47,8 @@ def cache_key(
         "qcd": qcd_payload,
         "processes": {
             n: {"kind": p.kind, "samples": sorted(
-                s.name for s in samples if s.process == n)}
+                s.name for s in samples if s.process == n),
+                **({"cut": p.cut} if p.cut else {})}
             for n, p in cfg.processes.items()
         },
         "lumi": cfg.lumi,

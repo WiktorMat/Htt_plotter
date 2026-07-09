@@ -1,19 +1,35 @@
-"""Datacard/shapes export, generated physics model, and Combine execution
-(standalone container).
+"""Datacard/shapes export, generated physics model, and Combine execution.
 
 Everything is driven by the FitConfig: the model (POIs + per-template yield
 scales) becomes a generated PhysicsModel, categories become datacard bins,
 scans become MultiDimFit stages. The engine has no physics modes.
 
-The combine container needs --cleanenv (drops the LCG PYTHONPATH), which also
-drops the kerberos cache, making EOS read-only inside it. All combine steps
-therefore run in a local scratch directory; results are copied back by the
-host process.
+Two execution backends, chosen automatically by whether the fit declares a TES
+morph (`fit.model.morphs`):
+
+* **container** (no morph): the standalone combine image. text2workspace builds a
+  generated WhamModel; the datacard is written by WHAM. autoMCStats is on, giving
+  one-to-one postfits. The container needs --cleanenv (drops the LCG PYTHONPATH),
+  which also drops the kerberos cache, making EOS read-only inside it; every step
+  runs in a local scratch dir and results are copied back.
+
+* **cmsenv / CombineHarvester** (morph present): runs under a CMSSW release
+  (`combine.cmssw`). WHY: a continuous TES morph and autoMCStats cannot coexist in
+  standalone combine — autoMCStats wraps each channel pdf in CMSHistErrorPropagator
+  and calls getXVar(), which RooMomentMorph/RooMorphingPdf don't implement, so the
+  morph fit had to disable autoMCStats and lost the one-to-one postfit. The only
+  morph that implements getXVar() is combine's own CMSHistFunc, built over the TES
+  grid by CombineHarvester's BuildCMSHistFuncFactory — and CH only exists inside
+  CMSSW. So morph fits build the datacard with a generated `harvest.py` (CH) and run
+  combine under cmsenv, keeping autoMCStats on. See the tau-sf-combineharvester
+  recipe and Configurations/tau_sf/README.md.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -28,9 +44,13 @@ from wham.config import AnalysisConfig
 from wham.fitconfig import (
     FitConfig,
     ScanCfg,
+    all_pois,
     datacard_processes,
     dc_name,
-    scale_map,
+    fpoint_str,
+    grid_points,
+    morph_point_label,
+    scale_entries,
     shape_affected,
     syst_matches,
     template_parents,
@@ -43,6 +63,21 @@ WORKSPACE_FILE = "workspace.root"
 MODEL_FILE = "whammodel.py"
 FITRESULT_FILE = "fitresult.json"
 DUMP_SCRIPT_FILE = "dump_fitresult.py"
+
+# CombineHarvester (cmsenv) backend, used when the fit has a TES morph: CH builds
+# the morph as a combine-native CMSHistFunc (getXVar -> autoMCStats works); see the
+# module docstring. The harvester reads WHAM's shapes.root and writes its own
+# datacard + shapes; combine then runs under cmsenv, not the standalone container.
+CH_HARVEST_FILE = "harvest.py"
+CH_SHAPES_FILE = "ch_shapes.root"  # CH-written shapes (morph ws + extracted TH1)
+
+
+def morph_template_name(dc_proc: str, morph_name: str, f: float) -> str:
+    """Histogram name of one TES grid template, in CombineHarvester's
+    $PROCESS_TES$MASS convention with a NUMERIC mass suffix (e.g.
+    DY_genuine_TES0.950) so ch.BuildCMSHistFuncFactory reads the morph axis."""
+    return f"{dc_proc}_TES{f:.3f}"
+
 
 # The model is generated from the fit config: one doVar per POI, one
 # expr:: per non-trivial yield scale, getYieldScale from a plain dict.
@@ -58,7 +93,7 @@ class WhamModel(PhysicsModel):
         self.modelBuilder.doSet("POI", "{poi_set}")
 
     def getYieldScale(self, bin, process):
-        return SCALES.get(process, 1)
+        return SCALES.get((bin, process)) or SCALES.get(process, 1)
 
 
 wham_model = WhamModel()
@@ -110,18 +145,20 @@ def model_source(fit: FitConfig) -> str:
         lines.append(
             f'        self.modelBuilder.doVar("{poi}[{pcfg.init:g},{lo:g},{hi:g}]")'
         )
-    scales: dict[str, str] = {}
-    for template, expr in scale_map(fit).items():
+    scales: dict = {}
+    for cat, template, expr in scale_entries(fit):
+        # shared scale -> keyed by template; per-category -> keyed by (bin, template)
+        key = template if cat is None else (cat, template)
         if expr.strip() in pois:  # bare POI: scale by the variable directly
-            scales[template] = expr.strip()
+            scales[key] = expr.strip()
             continue
         tformula, deps = translate_formula(expr, pois)
-        scale_name = f"scale_{template}"
+        scale_name = f"scale_{template}" if cat is None else f"scale_{cat}__{template}"
         lines.append(
             f"        self.modelBuilder.factory_("
             f"'expr::{scale_name}(\"{tformula}\", {', '.join(deps)})')"
         )
-        scales[template] = scale_name
+        scales[key] = scale_name
     return _MODEL_TEMPLATE.format(
         name=fit.name,
         scales=repr(scales),
@@ -132,7 +169,205 @@ def model_source(fit: FitConfig) -> str:
 
 def dump_script_source(fit: FitConfig) -> str:
     return _DUMP_TEMPLATE.format(
-        pois=repr(list(fit.model.pois)), fitdiag=fitdiag_file(fit), out=FITRESULT_FILE
+        pois=repr(all_pois(fit)), fitdiag=fitdiag_file(fit), out=FITRESULT_FILE
+    )
+
+
+# --------------------------------------------- CombineHarvester (morph) backend
+
+
+def ch_backend(fit: FitConfig) -> bool:
+    """A fit with a TES morph uses the CombineHarvester/cmsenv backend (see the
+    module docstring for why standalone combine cannot do morph + autoMCStats)."""
+    return bool(fit.model.morphs)
+
+
+def cmssw_base(fit: FitConfig) -> str:
+    """Resolve the CMSSW release for the CH backend; required, no default path."""
+    base = fit.combine.cmssw
+    if not base:
+        raise ValueError(
+            f"fit '{fit.name}' has a TES morph, which needs CombineHarvester from a "
+            "CMSSW release, but combine.cmssw is unset. Add e.g.\n"
+            "  combine:\n    cmssw: /afs/.../CMSSW_14_1_0_pre4\n"
+            "to the fit config (see Configurations/tau_sf/README.md)."
+        )
+    if not (Path(base) / "src").is_dir():
+        raise FileNotFoundError(f"combine.cmssw '{base}' has no src/ — not a CMSSW release")
+    return base
+
+
+# Generated CombineHarvester driver: reads WHAM's shapes.root directly (numeric
+# $PROCESS_TES$MASS templates), builds the per-DM datacard with the morphed signal
+# as a CMSHistFunc (getXVar -> autoMCStats works), and writes datacard + shapes.
+_HARVEST_TEMPLATE = '''"""Generated by wham: CombineHarvester datacard for fit '{name}'.
+
+The morphed signal is built as a combine-native CMSHistFunc via
+BuildCMSHistFuncFactory, the one morph that implements getXVar(), so autoMCStats
+(bin-by-bin stats -> one-to-one postfit) can stay on. Runs under cmsenv."""
+import ROOT
+from CombineHarvester.CombineTools import ch
+from CombineHarvester.CombinePdfs.morphing import BuildCMSHistFuncFactory
+
+ROOT.gROOT.SetBatch(True)
+ROOT.RooMsgService.instance().setGlobalKillBelow(ROOT.RooFit.ERROR)
+
+SHAPES = "{shapes}"
+BINS = {bins}            # [[idx, name], ...]
+BKG = {bkg}              # {{bin: [process, ...]}} present (nonzero) backgrounds
+SIGNAL = "{signal}"      # the morphed signal process (datacard-safe name)
+MASSES = {masses}        # TES grid as strings, e.g. ["0.950", ..., "1.050"]
+TES = "{tes}"            # tes POI name
+TES_RANGE = {tes_range}  # [lo, hi]
+LNN = {lnn}              # [{{name, sf, bins, procs}}, ...]
+SHAPESYS = {shapesys}    # [{{name, bins, procs}}, ...]
+RATEPARAMS = {rateparams}  # [{{name, bin, proc, init, range}}, ...]
+AUTOMCSTATS = {automcstats}  # int threshold, or None to disable
+
+ana, era, chan = ["wham"], ["13p6TeV"], ["mt"]
+cats = [(i, n) for i, n in BINS]
+
+cb = ch.CombineHarvester()
+cb.AddObservations(["*"], ana, era, chan, cats)
+for i, n in BINS:                       # backgrounds vary per bin
+    procs = BKG.get(n, [])
+    if procs:
+        cb.AddProcesses(["*"], ana, era, chan, procs, [(i, n)], False)
+cb.AddProcesses(MASSES, ana, era, chan, [SIGNAL], cats, True)  # morphed signal
+
+for s in LNN:
+    cb.cp().bin(s["bins"]).process(s["procs"]).AddSyst(
+        cb, s["name"], "lnN", ch.SystMap()(s["sf"]))
+for s in SHAPESYS:
+    cb.cp().bin(s["bins"]).process(s["procs"]).AddSyst(
+        cb, s["name"], "shape", ch.SystMap()(1.0))
+for r in RATEPARAMS:
+    cb.cp().bin([r["bin"]]).process([r["proc"]]).AddSyst(
+        cb, r["name"], "rateParam", ch.SystMap()(r["init"]))
+
+cb.cp().backgrounds().ExtractShapes(SHAPES, "$BIN/$PROCESS", "$BIN/$PROCESS_$SYSTEMATIC")
+cb.cp().signals().ExtractShapes(SHAPES, "$BIN/$PROCESS_TES$MASS", "$BIN/$PROCESS_$SYSTEMATIC")
+
+for r in RATEPARAMS:                    # bounds after the params exist
+    p = cb.GetParameter(r["name"])
+    if r["range"] is not None:
+        p.set_range(r["range"][0], r["range"][1])
+    p.set_val(r["init"])
+
+# Continuous TES morph as a CMSHistFunc over the grid, shared tes parameter.
+ws = ROOT.RooWorkspace("morph", "morph")
+tes = ROOT.RooRealVar(TES, TES, 1.0, TES_RANGE[0], TES_RANGE[1])
+tes.setConstant(True)                   # --redefineSignalPOIs frees it at fit time
+BuildCMSHistFuncFactory(ws, cb, tes, SIGNAL)  # signal morphs; backgrounds -> static CMSHistFunc
+cb.AddWorkspace(ws, False)
+# Every process now has a workspace function ($BIN_$PROCESS_morph); pointing all
+# of them at the ws (full cb, not just the signal) gives one wildcard shapes line
+# and avoids the leftover-TH1 / duplicate-FAKE-line clash.
+cb.ExtractPdfs(cb, "morph", "$BIN_$PROCESS_morph", "")
+cb.ExtractData("morph", "$BIN_data_obs")  # use ws data_obs (avoid duplicate line)
+
+if AUTOMCSTATS is not None:
+    cb.SetAutoMCStats(cb, AUTOMCSTATS, 1, 1)
+
+cb.WriteDatacard("{datacard}", "{ch_shapes}")
+print("harvest: wrote {datacard} (%d bins, %d masses)" % (len(BINS), len(MASSES)))
+'''
+
+
+def harvest_source(
+    fit: FitConfig,
+    cfg: AnalysisConfig,
+    present: dict[str, set[str]],
+    parents: dict[str, str],
+    shape_affected_map: dict[str, set[str]] | None = None,
+) -> str:
+    """Generate the cmsenv CombineHarvester driver for a morph fit.
+
+    `present[bin]` is the set of datacard process names actually written for that
+    bin (zero-yield backgrounds are dropped), so the CH model matches the shapes.
+    Only the bare-POI scales + single TES morph used by the SF measurement are
+    supported (a formula scale would need a PhysicsModel, which CH does not run).
+    """
+    if "r" in all_pois(fit):
+        raise ValueError(
+            "CH backend reserves the POI name 'r' for the default signal strength "
+            "(frozen at 1); rename the model POI (e.g. tid_SF_...)"
+        )
+    if len(fit.model.morphs) != 1:
+        raise NotImplementedError(
+            "CH backend supports exactly one morph (TES) per fit; "
+            f"'{fit.name}' has {len(fit.model.morphs)}"
+        )
+    mname, morph = next(iter(fit.model.morphs.items()))
+    signal = dc_name(morph.process)
+    signal_names, background_names = datacard_processes(fit, cfg)
+    if signal_names != [signal]:
+        raise NotImplementedError(
+            "CH backend requires the morphed process to be the only model process "
+            f"(model templates {signal_names}, morph process '{signal}')"
+        )
+
+    cats = [c.name for c in fit.categories]
+    bins = [[i, c] for i, c in enumerate(cats)]
+    bkg = {c: [b for b in background_names if b in present.get(c, set())] for c in cats}
+    masses = [f"{f:.3f}" for f in grid_points(morph.grid)]
+    all_dc = signal_names + background_names
+
+    def present_in(cat: str, name: str) -> bool:
+        return name in present.get(cat, set())
+
+    lnn, shapesys = [], []
+    for syst in fit.systematics:
+        sbins = list(syst.categories) if syst.categories is not None else cats
+        if syst.effect == "lnN":
+            procs = sorted({
+                n for c in sbins for n in all_dc
+                if present_in(c, n) and syst_matches(syst.processes, n, parents.get(n))
+            })
+            if procs:
+                lnn.append({"name": syst.name, "sf": syst.scaleFactor,
+                            "bins": sbins, "procs": procs})
+        elif syst.effect == "shape":
+            affected = (shape_affected_map or {}).get(syst.name, set())
+            procs = sorted({
+                n for c in sbins for n in all_dc
+                if present_in(c, n) and parents.get(n, n) in affected
+            })
+            if procs:
+                shapesys.append({"name": syst.name, "bins": sbins, "procs": procs})
+
+    rateparams: list[dict] = []
+    # bare-POI per-(bin, process) yield scales become rateParams (the ID SFs)
+    for cat, template, expr in scale_entries(fit):
+        e = expr.strip()
+        if e not in fit.model.pois:
+            raise NotImplementedError(
+                f"CH backend supports only bare-POI scales; got '{expr}' on '{template}' "
+                "(a formula scale needs a PhysicsModel, unavailable under CH)"
+            )
+        pcfg = fit.model.pois[e]
+        for b in (cats if cat is None else [cat]):
+            if present_in(b, template):
+                rateparams.append({"name": e, "bin": b, "proc": template,
+                                   "init": pcfg.init, "range": list(pcfg.range)})
+    # explicit rateParam systematics (free normalizations)
+    for syst in fit.systematics:
+        if syst.effect != "rateParam":
+            continue
+        sbins = list(syst.categories) if syst.categories is not None else cats
+        rng = list(syst.range) if syst.range else None
+        for c in sbins:
+            for n in all_dc:
+                if present_in(c, n) and syst_matches(syst.processes, n, parents.get(n)):
+                    rateparams.append({"name": syst.name, "bin": c, "proc": n,
+                                       "init": syst.init, "range": rng})
+
+    return _HARVEST_TEMPLATE.format(
+        name=fit.name, shapes=SHAPES_FILE, datacard=DATACARD_FILE, ch_shapes=CH_SHAPES_FILE,
+        bins=repr(bins), bkg=repr(bkg), signal=repr(signal)[1:-1],
+        masses=repr(masses), tes=mname, tes_range=repr(list(morph.range)),
+        lnn=repr(lnn), shapesys=repr(shapesys), rateparams=repr(rateparams),
+        automcstats=repr(fit.auto_mc_stats),
     )
 
 
@@ -238,6 +473,36 @@ def fit_templates(
                         hv = _slice1d(h_fitcp, proc, comp, vlabel)
                         _clip_negative(hv, f"{cat.name}/{proc} {comp} {suffix}", console)
                         t[f"{dc_name(f'{proc}_{comp}')}_{suffix}"] = hv
+        # TES grid templates: the morphed process refilled at each grid point
+        # with its scaled columns — shape AND yield vary with f (scaled cuts
+        # migrate events across category edges). CMSHistFunc interpolates the
+        # template integrals linearly in f, so the yield slope enters the fit.
+        for mname, morph in fit.model.morphs.items():
+            if cat.name not in morph.categories:
+                continue
+            dcgen = dc_name(morph.process)
+            yields: list[tuple[float, float]] = []
+            for f in grid_points(morph.grid):
+                vlabel = "nominal" if abs(f - 1.0) < 1e-9 else morph_point_label(mname, f)
+                hg = _slice1d(h_datamc, morph.process, region, vlabel)
+                _clip_negative(hg, f"{cat.name}/{dcgen} {mname} f={f}", console)
+                total = float(hg.view()["value"].sum())
+                if total <= 0:
+                    # CMSHistFunc silently returns an EMPTY signal on any grid
+                    # segment whose endpoint template has non-positive integral
+                    raise ValueError(
+                        f"morph '{mname}': grid template f={f} in '{cat.name}' "
+                        f"has non-positive yield ({total:.4g})"
+                    )
+                yields.append((f, total))
+                t[morph_template_name(dcgen, mname, f)] = hg
+            if console is not None and yields:
+                fmin, ymin = min(yields, key=lambda p: p[1])
+                fmax, ymax = max(yields, key=lambda p: p[1])
+                console.print(
+                    f"  morph '{mname}' in '{cat.name}': yield "
+                    f"{ymin:.1f} (f={fmin:g}) .. {ymax:.1f} (f={fmax:g})"
+                )
         templates[cat.name] = t
 
     cats = [c.name for c in fit.categories]
@@ -292,7 +557,7 @@ def write_datacard(
         return syst.categories is None or cat in syst.categories
 
     lines = [
-        f"# wham {__version__} | fit '{fit.name}' | POIs {', '.join(fit.model.pois)}",
+        f"# wham {__version__} | fit '{fit.name}' | POIs {', '.join(all_pois(fit))}",
         f"imax {len(cats)}  number of categories",
         "jmax *  number of processes minus 1",
         "kmax *  number of nuisance parameters",
@@ -338,7 +603,10 @@ def write_datacard(
             if allowed(syst, c) and syst_matches(syst.processes, n, parents.get(n)):
                 lines.append(f"{syst.name} rateParam {c} {n} {syst.init:g}{bounds}")
 
-    if fit.auto_mc_stats is not None:
+    # autoMCStats builds a per-bin stat model that calls getXVar() on every
+    # process pdf; the external RooMomentMorph used for TES morphing lacks that
+    # combine method, so it is incompatible — skip it when morphs are present.
+    if fit.auto_mc_stats is not None and not fit.model.morphs:
         lines.append(f"* autoMCStats {fit.auto_mc_stats}")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -350,6 +618,10 @@ def export_key(fit: FitConfig, input_hist_keys: dict) -> str:
             "fit": fit.model_dump(mode="json"),
             "hists": {"/".join(map(str, k)): v for k, v in sorted(input_hist_keys.items())},
             "version": __version__,
+            # the combine invocations themselves (fitresult-independent form):
+            # option changes (e.g. minimizer tolerance) must retrigger the run
+            "commands": [fitdiag_command(fit)]
+            + [scan_command(fit, s, None) for s in fit.resolved_scans()],
         }
     )
 
@@ -357,23 +629,80 @@ def export_key(fit: FitConfig, input_hist_keys: dict) -> str:
 # ------------------------------------------------------------- container
 
 
+def _stream(argv: list[str], command: str, timeout: int = 1800) -> str:
+    """Run argv, streaming output live (so long stages are monitorable) and
+    returning it for the log; raise on non-zero exit or timeout."""
+    import select
+
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, bufsize=1)
+    lines: list[str] = []
+    deadline = time.time() + timeout
+    try:
+        while True:
+            if time.time() > deadline:
+                proc.kill()
+                raise subprocess.TimeoutExpired(command, timeout)
+            ready, _, _ = select.select([proc.stdout], [], [], 1.0)
+            if ready:
+                line = proc.stdout.readline()
+                if line == "":  # EOF
+                    break
+                print(line, end="", flush=True)  # live to the terminal
+                lines.append(line)
+            elif proc.poll() is not None:
+                for line in proc.stdout:  # drain anything buffered
+                    print(line, end="", flush=True)
+                    lines.append(line)
+                break
+    finally:
+        proc.wait()
+    output = "".join(lines)
+    if proc.returncode != 0:
+        tail = "\n".join(output.splitlines()[-25:])
+        raise RuntimeError(f"command failed ({command!r}):\n{tail}")
+    return output
+
+
 def run_container(image: str, scratch: Path, command: str) -> str:
-    """Run a command inside the combine container; returns combined output."""
+    """Run a command inside the standalone combine container. --cleanenv drops
+    the LCG PYTHONPATH (and the kerberos cache, hence the local scratch)."""
     argv = [
         "apptainer", "exec", "--cleanenv",
         "--home", str(scratch), "--pwd", str(scratch),
         image, "bash", "-lc", command,
     ]
-    result = subprocess.run(argv, capture_output=True, text=True, timeout=1800)
-    output = result.stdout + result.stderr
-    if result.returncode != 0:
-        tail = "\n".join(output.splitlines()[-25:])
-        raise RuntimeError(f"container command failed ({command!r}):\n{tail}")
-    return output
+    return _stream(argv, command)
+
+
+def run_cmsenv(cmssw: str, scratch: Path, command: str) -> str:
+    """Run a command under a CMSSW cmsenv (the CombineHarvester backend).
+
+    Mirrors the container's --cleanenv: WHAM runs under an LCG view that exports
+    PYTHONHOME/PYTHONPATH/LD_LIBRARY_PATH which break CMSSW's own python + ROOT, so
+    the subprocess starts from a scrubbed env and lets cmsset/scram build the
+    combine runtime. Scratch is local /tmp, so no kerberos/EOS is needed inside."""
+    setup = (
+        "source /cvmfs/cms.cern.ch/cmsset_default.sh >/dev/null 2>&1 && "
+        f"cd {shlex.quote(cmssw)}/src && eval `scramv1 runtime -sh` && "
+        f"cd {shlex.quote(str(scratch))} && "
+    )
+    argv = [
+        "env", "-i",
+        f"HOME={os.environ.get('HOME', '/tmp')}",
+        f"USER={os.environ.get('USER', '')}",
+        "PATH=/usr/bin:/bin",
+        "bash", "-c", setup + command,
+    ]
+    return _stream(argv, command)
 
 
 def t2w_command(fit: FitConfig) -> str:
-    # the generated model file sits next to the datacard in the scratch dir
+    # CH datacards carry their own model (rateParams + the CMSHistFunc morph), so
+    # text2workspace uses the default model; the container path uses the generated
+    # WhamModel sitting next to the datacard in the scratch dir.
+    if ch_backend(fit):
+        return f"text2workspace.py {DATACARD_FILE} -o {WORKSPACE_FILE}"
     return (
         "PYTHONPATH=$PWD:$PYTHONPATH "
         f"text2workspace.py {DATACARD_FILE} -o {WORKSPACE_FILE} "
@@ -381,20 +710,48 @@ def t2w_command(fit: FitConfig) -> str:
     )
 
 
+def _poi_redef(fit: FitConfig) -> str:
+    """Morph POIs live in the imported morph workspace, not the model's POI set;
+    promote the full POI list at fit time so they float and are reported."""
+    return f"--redefineSignalPOIs {','.join(all_pois(fit))} " if fit.model.morphs else ""
+
+
 def _common_fit_opts(fit: FitConfig) -> str:
-    opts = []
+    opts: list[str] = []
+    params: dict[str, float] = {}
     if fit.asimov.enabled:
         opts.append("-t -1")
-        params = {p: cfg.init for p, cfg in fit.model.pois.items()}
+        params.update({p: pcfg.init for p, pcfg in fit.model.pois.items()})
+        params.update({m: mc.init for m, mc in fit.model.morphs.items()})
         params.update(fit.asimov.parameters)
+    if ch_backend(fit):
+        # CH's default model keeps the signal-strength r; the SFs/TES are the real
+        # POIs (promoted via _poi_redef), so r is pinned to 1.
+        params["r"] = 1.0
+        opts.append("--freezeParameters r")
+        # the default tolerance (0.1) leaves the minimum fuzzy at the ~0.5
+        # units-of-2ΔlnL level with O(100) autoMCStats parameters, so the
+        # FitDiagnostics and scan minima visibly disagree; tighten it
+        opts.append("--cminDefaultMinimizerTolerance 0.01")
+        # scan the POIs before minimizing: the profiled fake-ES nuisances can
+        # carve multiple basins in tes, and Migrad alone commits to whichever
+        # basin it starts in (seen: FitDiagnostics 4 units of 2ΔlnL above the
+        # scan minimum)
+        opts.append("--cminPreScan")
+    if params:
         opts.append("--setParameters " + ",".join(f"{k}={v:g}" for k, v in params.items()))
     return " ".join(opts)
 
 
 def fitdiag_command(fit: FitConfig) -> str:
+    # --robustHesse is required for the CH backend's postfit error band: with the
+    # ~O(100) autoMCStats bin parameters the default Hesse gives covQual<3 and a
+    # zero-width band; robustHesse recovers it.
+    robust = "--robustHesse 1 " if ch_backend(fit) else ""
     return (
         f"combine -M FitDiagnostics {WORKSPACE_FILE} -n .{fit.name} "
-        f"--saveShapes --saveWithUncertainties {_common_fit_opts(fit)}"
+        f"--saveShapes --saveWithUncertainties -v 1 {robust}"
+        f"{_poi_redef(fit)}{_common_fit_opts(fit)}"
     )
 
 
@@ -413,7 +770,8 @@ def scan_window(
         return scan.range
     if len(scan.pois) == 2 and scan.ranges is not None:
         return tuple(scan.ranges[index])
-    lo, hi = fit.model.pois[poi].range
+    pcfg = fit.model.pois.get(poi) or fit.model.morphs[poi]  # rate or morph POI
+    lo, hi = pcfg.range
     params = (fitresult or {}).get("params", {})
     if poi in params and params[poi].get("error", 0) > 0:
         best, sigma = params[poi]["value"], params[poi]["error"]
@@ -428,9 +786,12 @@ def scan_command(fit: FitConfig, scan: ScanCfg, fitresult: dict | None = None) -
         for lo, hi in [scan_window(fit, scan, poi, i, fitresult)]
     ]
     points = scan.points if len(scan.pois) == 1 else scan.points**2
+    # with multiple POIs, the un-scanned ones must be profiled (not frozen at
+    # their inits) for a correct 1D/2D scan — e.g. tes per DM + the ID SFs
+    float_others = "--floatOtherPOIs 1 " if len(all_pois(fit)) > len(scan.pois) else ""
     return (
         f"combine -M MultiDimFit {WORKSPACE_FILE} -n .scan_{fit.name}_{scan_tag(scan)} "
-        f"--algo grid --points {points} "
+        f"--algo grid --points {points} -v 1 {_poi_redef(fit)}{float_others}"
         + " ".join(f"-P {p}" for p in scan.pois)
         + f" --setParameterRanges {':'.join(ranges)} --saveNLL "
         f"{_common_fit_opts(fit)}"
@@ -479,14 +840,36 @@ def run_fit(
     def missing(name: str) -> bool:
         return not (fitdir / name).is_file()
 
+    ch = ch_backend(fit)
+    cmssw = cmssw_base(fit) if ch else None  # resolve early: clear error if unset
     stale = force or key != old_key
-    do_export = stale or missing(DATACARD_FILE) or missing(SHAPES_FILE) or missing(MODEL_FILE)
-    do_t2w = do_export or missing(WORKSPACE_FILE)
+    do_export = (
+        stale or missing(SHAPES_FILE)
+        or (missing(CH_HARVEST_FILE) if ch
+            else (missing(DATACARD_FILE) or missing(MODEL_FILE)))
+    )
+    # CH builds the datacard itself (needs cmsenv), so it is a run stage, not an
+    # export; the container path writes its datacard at export time.
+    if ch:
+        do_harvest = do_export or missing(DATACARD_FILE) or missing(CH_SHAPES_FILE)
+        do_t2w = do_harvest or missing(WORKSPACE_FILE)
+    else:
+        do_harvest = False
+        do_t2w = do_export or missing(WORKSPACE_FILE)
     do_fitdiag = do_t2w or missing(fitdiag_file(fit))
     do_dump = do_fitdiag or missing(FITRESULT_FILE)
     scans = fit.resolved_scans()
 
     templates, signal_names, background_names = fit_templates(fit, cfg, hists_by_cat, console)
+    parents = template_parents(fit, cfg)
+    shape_affected_map = {
+        s.name: shape_affected(fit, cfg, s) for s in fit.systematics if s.effect == "shape"
+    }
+
+    def _harvest() -> str:
+        return harvest_source(
+            fit, cfg, {c: set(t) for c, t in templates.items()}, parents, shape_affected_map,
+        )
 
     if do_export:
         # the effective fit config — provenance and a ready-to-copy reference
@@ -495,25 +878,25 @@ def run_fit(
             encoding="utf-8",
         )
         write_shapes(fitdir / SHAPES_FILE, templates)
-        write_datacard(
-            fitdir / DATACARD_FILE,
-            fit=fit, templates=templates,
-            signal_names=signal_names, background_names=background_names,
-            parents=template_parents(fit, cfg),
-            shape_affected_map={
-                s.name: shape_affected(fit, cfg, s)
-                for s in fit.systematics if s.effect == "shape"
-            },
-        )
-        (fitdir / MODEL_FILE).write_text(model_source(fit), encoding="utf-8")
-        if console is not None:
-            console.print(f"  [green]exported[/green] {fitdir / DATACARD_FILE}")
+        if ch:
+            (fitdir / CH_HARVEST_FILE).write_text(_harvest(), encoding="utf-8")
+            if console is not None:
+                console.print(
+                    f"  [green]exported[/green] {fitdir / CH_HARVEST_FILE} "
+                    "(CombineHarvester / cmsenv backend)"
+                )
+        else:
+            write_datacard(
+                fitdir / DATACARD_FILE,
+                fit=fit, templates=templates,
+                signal_names=signal_names, background_names=background_names,
+                parents=parents, shape_affected_map=shape_affected_map,
+            )
+            (fitdir / MODEL_FILE).write_text(model_source(fit), encoding="utf-8")
+            if console is not None:
+                console.print(f"  [green]exported[/green] {fitdir / DATACARD_FILE}")
     elif console is not None:
         console.print("  datacard/shapes up to date")
-
-    if datacard_only:
-        manifest_path.write_text(json.dumps({"export_key": key, "time": time.time()}))
-        return fitdir
 
     def _fitresult() -> dict | None:
         # available to the scan stages: the dump stage runs (and is copied
@@ -523,30 +906,29 @@ def run_fit(
         except (OSError, json.JSONDecodeError):
             return None
 
-    stages = [
-        ("text2workspace", do_t2w, t2w_command(fit), [WORKSPACE_FILE]),
-        ("FitDiagnostics", do_fitdiag, fitdiag_command(fit), [fitdiag_file(fit)]),
-        ("fit result dump", do_dump, f"python3 {DUMP_SCRIPT_FILE}", [FITRESULT_FILE]),
-        *(
-            (f"MultiDimFit scan ({scan_tag(scan)})",
-             do_t2w or do_dump or missing(scan_file(fit, scan)),
-             lambda scan=scan: scan_command(fit, scan, _fitresult()),
-             [scan_file(fit, scan)])
-            for scan in scans
-        ),
-    ]
-
-    if any(run for _, run, _, _ in stages):
+    def run_stages(stages: list) -> None:
+        """Run the listed (label, do, command, products) stages in a local
+        scratch dir under the chosen backend; copy products back to fitdir."""
+        if not any(run for _, run, _, _ in stages):
+            if console is not None:
+                console.print("  all combine stages up to date")
+            return
         # Scratch must be genuinely local: TMPDIR may point at EOS, which is
         # read-only inside the --cleanenv container (no kerberos cache).
         scratch = Path(tempfile.mkdtemp(prefix="wham_fit_", dir="/tmp"))
         log_lines: list[str] = []
         try:
-            shutil.copy2(fitdir / DATACARD_FILE, scratch)
             shutil.copy2(fitdir / SHAPES_FILE, scratch)
-            # deterministic from the config; regenerate rather than copy
-            (scratch / MODEL_FILE).write_text(model_source(fit), encoding="utf-8")
             (scratch / DUMP_SCRIPT_FILE).write_text(dump_script_source(fit), encoding="utf-8")
+            if ch:
+                # the harvester reads shapes.root and writes datacard + ch_shapes
+                (scratch / CH_HARVEST_FILE).write_text(_harvest(), encoding="utf-8")
+                if not do_harvest:  # cached datacard/shapes for skipped harvest
+                    shutil.copy2(fitdir / DATACARD_FILE, scratch)
+                    shutil.copy2(fitdir / CH_SHAPES_FILE, scratch)
+            else:
+                shutil.copy2(fitdir / DATACARD_FILE, scratch)
+                (scratch / MODEL_FILE).write_text(model_source(fit), encoding="utf-8")
             if not do_t2w and not missing(WORKSPACE_FILE):
                 shutil.copy2(fitdir / WORKSPACE_FILE, scratch)
             if not do_fitdiag and not missing(fitdiag_file(fit)):
@@ -561,7 +943,10 @@ def run_fit(
                     command = command()
                 t0 = time.perf_counter()
                 log_lines.append(f"$ {command}")
-                log_lines.append(run_container(fit.combine.image, scratch, command))
+                if ch:
+                    log_lines.append(run_cmsenv(cmssw, scratch, command))
+                else:
+                    log_lines.append(run_container(fit.combine.image, scratch, command))
                 for product in products:
                     shutil.copy2(scratch / product, fitdir / product)
                 if console is not None:
@@ -571,8 +956,29 @@ def run_fit(
         finally:
             (fitdir / "combine.log").write_text("\n".join(log_lines), encoding="utf-8")
             shutil.rmtree(scratch, ignore_errors=True)
-    elif console is not None:
-        console.print("  all combine stages up to date")
+
+    harvest_stage = ("harvest datacard (CombineHarvester)", do_harvest,
+                     f"python3 {CH_HARVEST_FILE}", [DATACARD_FILE, CH_SHAPES_FILE])
+
+    if datacard_only:
+        if ch:  # the CH datacard only exists once the harvester has run (cmsenv)
+            run_stages([harvest_stage])
+        manifest_path.write_text(json.dumps({"export_key": key, "time": time.time()}))
+        return fitdir
+
+    stages = ([harvest_stage] if ch else []) + [
+        ("text2workspace", do_t2w, t2w_command(fit), [WORKSPACE_FILE]),
+        ("FitDiagnostics", do_fitdiag, fitdiag_command(fit), [fitdiag_file(fit)]),
+        ("fit result dump", do_dump, f"python3 {DUMP_SCRIPT_FILE}", [FITRESULT_FILE]),
+        *(
+            (f"MultiDimFit scan ({scan_tag(scan)})",
+             do_t2w or do_dump or missing(scan_file(fit, scan)),
+             lambda scan=scan: scan_command(fit, scan, _fitresult()),
+             [scan_file(fit, scan)])
+            for scan in scans
+        ),
+    ]
+    run_stages(stages)
 
     manifest_path.write_text(json.dumps({"export_key": key, "time": time.time()}))
     return fitdir

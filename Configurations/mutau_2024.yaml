@@ -39,7 +39,7 @@ processes: # TODO: split DY to genuine tau and fake tau components
   data:     {kind: data, samples: ["Muon0_*", "Muon1_*"], color: "black"}
 
 qcd:
-  method: ff                # switch back to 'abcd' to drop the BDT fake factors
+  method: abcd              # per-bin transfer factor from the anti-iso sidebands
   os: "os == 1"
   iso: "idDeepTau2018v2p5VSjet_2 >= 5"
   antiiso: "idDeepTau2018v2p5VSjet_2 > 1 & idDeepTau2018v2p5VSjet_2 < 5"
@@ -82,8 +82,11 @@ plots:
   datamc:     [pt_1, pt_2, m_vis, m_vis_coarse, m_vis_varbins,
                mt_tot, mt_1, mt_2, met_pt, met_phi, dR, bdt_ff_qcd,
                aco_unrolled]
-  # anti-iso QCD (data - MC) before/after the FF weight + weighted/raw ratio
-  ffcheck:    [bdt_ff_qcd, pt_2, m_vis, mt_tot, met_pt]
   cp:
     - {var: aco_mu_rho, even: wt_cp_sm, odd: wt_cp_ps}
   display3d:  {sample: "TTto2L2Nu", n_events: 3}
+
+
+  #per DM split plotting. i dont know how do so but needs to be applied to the plots section of the config file,
+  #or somewhere where it can be easy to implement. 
+  #add option for blinding. like Blind: true, and then in the plotting code, if blind is true, then for data, plot nothing and overwrite the label to "Internal, Simulation".

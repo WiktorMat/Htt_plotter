@@ -12,6 +12,7 @@ from wham.combine import (
     dc_name,
     export_key,
     fit_templates,
+    harvest_source,
     inject_toy_asymmetry,
     model_source,
     run_fit,
@@ -38,6 +39,20 @@ from wham.skim import ensure_skims
 COMBINE_IMAGE = Path(
     "/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/cms-cloud/combine-standalone:latest"
 )
+
+
+def _cmssw_dir() -> str | None:
+    """A CMSSW release with combine + CombineHarvester, for the morph backend."""
+    import os
+
+    for cand in (os.environ.get("CMSSW_BASE"),
+                 "/afs/cern.ch/user/h/haawedik/CMSSW_14_1_0_pre4"):
+        if cand and (Path(cand) / "src").is_dir():
+            return cand
+    return None
+
+
+CMSSW_DIR = _cmssw_dir()
 
 _SCALE_MODEL = """
 model:
@@ -208,7 +223,7 @@ def test_systematic_cfg_validation() -> None:
     s = SystematicCfg(name="x", effect="rateParam", processes=["A"], range=(0.1, 5.0))
     assert s.init == 1.0
 
-    with pytest.raises(ValueError, match="needs weight_up and weight_down"):
+    with pytest.raises(ValueError, match="either weight_up/weight_down or scales"):
         SystematicCfg(name="x", effect="shape", processes=["A"], weight_up="w")
     with pytest.raises(ValueError, match="do not apply to shape"):
         SystematicCfg(name="x", effect="shape", processes=["A"],
@@ -257,6 +272,169 @@ def test_model_source_scale(fit_setup) -> None:
     assert 'self.modelBuilder.doVar("r[1,0,3]")' in src
     assert "SCALES = {'DY': 'r'}" in src  # bare POI: no expr:: needed
     assert 'self.modelBuilder.doSet("POI", "r")' in src
+
+
+def test_per_category_scale() -> None:
+    from wham.fitconfig import scale_entries
+
+    fit = FitConfig.model_validate({
+        "name": "t", "analysis": "a",
+        "categories": [{"name": "c1", "variable": "x"},
+                       {"name": "c2", "variable": "x"}],
+        "model": {
+            "pois": {"sf1": {"range": [0, 3]}, "sf2": {"range": [0, 3]}},
+            "processes": {"DY": {"scale": {"c1": "sf1", "c2": "sf2"}}},
+        },
+    })
+    # one entry per (category, template), carrying its own expression
+    assert set(scale_entries(fit)) == {("c1", "DY", "sf1"), ("c2", "DY", "sf2")}
+
+    src = model_source(fit)
+    assert 'self.modelBuilder.doVar("sf1[1,0,3]")' in src
+    assert 'self.modelBuilder.doVar("sf2[1,0,3]")' in src
+    # SCALES keyed by (bin, process); getYieldScale falls back per process
+    assert "('c1', 'DY'): 'sf1'" in src
+    assert "('c2', 'DY'): 'sf2'" in src
+    assert "SCALES.get((bin, process)) or SCALES.get(process, 1)" in src
+    assert 'self.modelBuilder.doSet("POI", "sf1,sf2")' in src
+
+
+def test_per_category_scale_unknown_category() -> None:
+    with pytest.raises(ValueError, match="scale maps unknown categories"):
+        FitConfig.model_validate({
+            "name": "t", "analysis": "a",
+            "categories": [{"name": "c1", "variable": "x"}],
+            "model": {
+                "pois": {"sf1": {"range": [0, 3]}, "sf2": {"range": [0, 3]}},
+                "processes": {"DY": {"scale": {"c1": "sf1", "nope": "sf2"}}},
+            },
+        })
+
+
+def _morph_fit(**morph_over) -> dict:
+    morph = {"process": "DY", "grid": {"from": 0.95, "to": 1.05, "step": 0.005},
+             "categories": ["dm0_pt1"], "range": [0.95, 1.05],
+             "scales": {"x": "sqrt", "pt_2": "linear"}}
+    morph.update(morph_over)
+    return {
+        "name": "t", "analysis": "a",
+        "categories": [{"name": "dm0_pt1", "variable": "x"},
+                       {"name": "dm1_pt1", "variable": "x"}],
+        "model": {
+            "pois": {"sf0": {"range": [0, 3]}, "sf1": {"range": [0, 3]}},
+            "processes": {"DY": {"scale": {"dm0_pt1": "sf0", "dm1_pt1": "sf1"}}},
+            "morphs": {
+                "tes_dm0": morph,
+                "tes_dm1": {"process": "DY", "grid": {"from": 0.99, "to": 1.01, "step": 0.005},
+                            "categories": ["dm1_pt1"], "range": [0.95, 1.05],
+                            "scales": {"x": "sqrt"}},
+            },
+        },
+    }
+
+
+def test_morph_schema_and_variations() -> None:
+    import math
+
+    from wham.fitconfig import all_pois, grid_points, morph_point_label, morph_variations
+
+    fit = FitConfig.model_validate(_morph_fit())
+    assert all_pois(fit) == ["sf0", "sf1", "tes_dm0", "tes_dm1"]
+
+    pts = grid_points(fit.model.morphs["tes_dm0"].grid)  # 'from' alias accepted
+    assert len(pts) == 21 and pts[0] == 0.95 and pts[-1] == 1.05
+
+    # per-category: only that category's morph, nominal (f=1) skipped
+    v0 = morph_variations(fit, "dm0_pt1")
+    assert len(v0) == 20
+    assert all(x.target == "columns" and x.processes == ["DY"] for x in v0)
+    by_name = {x.name: x for x in v0}
+    lab = morph_point_label("tes_dm0", 1.005)
+    # per-column laws: sqrt(f) for the mass-like observable, f for pt
+    assert by_name[lab].factors["x"] == pytest.approx(math.sqrt(1.005))
+    assert by_name[lab].factors["pt_2"] == pytest.approx(1.005)
+    assert len(morph_variations(fit, "dm1_pt1")) == 4  # 5-point grid - nominal
+
+    # default scans cover rate POIs then morph POIs
+    assert [s.pois for s in fit.resolved_scans()] == [["sf0"], ["sf1"], ["tes_dm0"], ["tes_dm1"]]
+
+
+def test_morph_needs_scales() -> None:
+    with pytest.raises(ValueError):
+        FitConfig.model_validate(_morph_fit(scales={}))
+
+
+def test_morph_unknown_category() -> None:
+    with pytest.raises(ValueError, match="morph 'tes_dm0' restricted to unknown categories"):
+        FitConfig.model_validate(_morph_fit(categories=["nope"]))
+
+
+def _morph_workspace_fit(workspace: dict):
+    """Load a TES-morph fit against the synthetic workspace + fill its hists.
+
+    POI is named `mu` (not `r`): the CombineHarvester morph backend reserves `r`
+    for the default signal strength. cmssw is set so the CH backend can resolve a
+    release; only the cmsenv integration test actually runs combine."""
+    fit_yaml = workspace["tmp"] / "morphfit.yaml"
+    fit_yaml.write_text(
+        f"""
+name: morphfit
+analysis: {workspace["yaml"]}
+categories:
+  - {{name: SR, variable: met_phi}}
+model:
+  pois:
+    mu: {{init: 1, range: [0, 3]}}
+  processes:
+    DY: {{scale: "mu"}}
+  morphs:
+    tes:
+      process: DY
+      grid: {{from: 0.9, to: 1.1, step: 0.05}}
+      categories: [SR]
+      scales: {{met_phi: sqrt}}
+      range: [0.9, 1.1]
+asimov: {{enabled: true}}
+combine: {{cmssw: {CMSSW_DIR or "/nonexistent/CMSSW"}}}
+scans:
+  - {{pois: [tes], points: 8}}
+""",
+        encoding="utf-8",
+    )
+    fit, cfg = load_fit_config(fit_yaml)
+    samples, _ = discover_samples(cfg)
+    skims = ensure_skims(union_analysis(fit, cfg), samples, workers=1)
+    hists = {}
+    for cat in fit.categories:
+        ccfg = category_analysis(fit, cfg, cat)
+        hists[cat.name] = fill_all(ccfg, samples, skims, families=fit_families(fit),
+                                   only_vars=(cat.variable,), workers=1, sidecars=False)
+    return fit, cfg, hists
+
+
+def test_morph_harvest_export(workspace: dict) -> None:
+    """A morph fit generates a CombineHarvester driver (cmsenv backend), not the
+    container datacard. Checks the generated harvest.py + the TES grid shapes."""
+    fit, cfg, hists = _morph_workspace_fit(workspace)
+    templates, _signals, _bkgs = fit_templates(fit, cfg, hists)
+    present = {c: set(t) for c, t in templates.items()}
+    src = harvest_source(fit, cfg, present, template_parents(fit, cfg))
+
+    # CMSHistFunc morph (not RooMomentMorph), the signal, the TES grid + POI names
+    assert "BuildCMSHistFuncFactory" in src
+    assert 'SIGNAL = "DY"' in src and 'TES = "tes"' in src
+    assert "$BIN/$PROCESS_TES$MASS" in src           # CH signal shape pattern
+    for mass in ("0.900", "1.000", "1.100"):
+        assert f"'{mass}'" in src, mass
+    assert "tid" not in src and "'name': 'mu'" in src  # the bare-POI scale -> rateParam
+
+    # the 5-point grid (0.9..1.1 step .05) incl. the nominal point is in shapes.root
+    shapes = workspace["tmp"] / "shapes_check.root"
+    write_shapes(shapes, templates)
+    with uproot.open(shapes) as f:
+        names = {k.split("/")[-1].split(";")[0] for k in f.keys()}
+    for tag in ("DY_TES0.900", "DY_TES1.000", "DY_TES1.100"):
+        assert tag in names, tag
 
 
 def test_model_source_components(fit_setup) -> None:
@@ -524,6 +702,30 @@ def test_full_rate_fit_in_container(fit_setup) -> None:
 
 
 @pytest.mark.combine
+@pytest.mark.skipif(CMSSW_DIR is None, reason="no CMSSW with CombineHarvester available")
+def test_morph_fit_cmsenv(workspace: dict) -> None:
+    """Full TES-morph path through the CombineHarvester/cmsenv backend: the
+    harvester builds the datacard with a CMSHistFunc morph (autoMCStats on),
+    text2workspace + FitDiagnostics run, and the morph POI is floated/reported
+    (physics recovery is covered separately; synthetic samples are featureless)."""
+    fit, cfg, hists = _morph_workspace_fit(workspace)
+    fitdir = run_fit(fit, cfg, hists, {("SR", "datamc", "met_phi"): "k"})
+
+    # the CH backend writes its own datacard + shapes, then the workspace
+    assert (fitdir / "harvest.py").is_file()
+    assert (fitdir / "ch_shapes.root").is_file()
+    assert (fitdir / "workspace.root").is_file()
+    card = (fitdir / "datacard.txt").read_text()
+    assert "autoMCStats" in card                           # BBB on (one-to-one postfit)
+
+    result = json.loads((fitdir / "fitresult.json").read_text())
+    assert "tes" in result["params"]                       # morph POI promoted + fitted
+    assert result["params"]["tes"]["error"] >= 0
+    assert result["params"]["mu"]["value"] == pytest.approx(1.0, abs=0.1)  # rate constrained
+    assert (fitdir / scan_file(fit, fit.resolved_scans()[0])).is_file()   # tes scan ran
+
+
+@pytest.mark.combine
 @pytest.mark.skipif(
     shutil.which("apptainer") is None or not COMBINE_IMAGE.exists(),
     reason="apptainer or combine image unavailable",
@@ -563,3 +765,59 @@ def test_multipoi_two_category_recovery_in_container(fit_setup, workspace: dict)
     # datacard is genuinely multi-bin
     text = (fitdir / "datacard.txt").read_text()
     assert "imax 2" in text
+
+
+def test_shape_systematic_scales_schema() -> None:
+    from wham.fitconfig import SystematicCfg
+
+    ok = SystematicCfg(name="jtf", effect="shape", processes=["DY_jfake"],
+                       scales={"m_vis": "sqrt", "pt_2": "linear"}, shift=0.10)
+    assert ok.shift == 0.10
+
+    with pytest.raises(ValueError, match="either weight_up/weight_down or scales"):
+        SystematicCfg(name="bad", effect="shape", processes=["DY"])  # neither flavor
+    with pytest.raises(ValueError, match="either weight_up/weight_down or scales"):
+        SystematicCfg(name="bad", effect="shape", processes=["DY"],
+                      weight_up="w*2", weight_down="w*0.5",
+                      scales={"pt_2": "linear"}, shift=0.03)  # both flavors
+    with pytest.raises(ValueError, match="shape-only"):
+        SystematicCfg(name="bad", effect="lnN", processes=["DY"], scaleFactor=1.1,
+                      scales={"pt_2": "linear"}, shift=0.03)
+
+
+def test_shape_variations_column_shift(workspace: dict) -> None:
+    """A scales+shift shape systematic resolves into an up/down pair of
+    columns-target fill variations with the per-law factors."""
+    import math
+
+    from wham.fitconfig import shape_variations
+
+    fit_yaml = workspace["tmp"] / "esfit.yaml"
+    fit_yaml.write_text(
+        f"""
+name: esfit
+analysis: {workspace["yaml"]}
+categories:
+  - {{name: SR, variable: m_vis}}
+model:
+  pois:
+    mu: {{init: 1, range: [0, 3]}}
+  processes:
+    DY: {{scale: "mu"}}
+systematics:
+  - {{name: jtf, effect: shape, processes: [TT],
+      scales: {{m_vis: sqrt, pt_2: linear}}, shift: 0.10}}
+""",
+        encoding="utf-8",
+    )
+    fit, cfg = load_fit_config(fit_yaml)
+    vars_ = shape_variations(fit, cfg)
+    assert [v.name for v in vars_] == ["jtf_up", "jtf_down"]
+    assert all(v.target == "columns" and v.processes == ["TT"] for v in vars_)
+    up, down = vars_
+    assert up.factors["pt_2"] == pytest.approx(1.10)
+    assert up.factors["m_vis"] == pytest.approx(math.sqrt(1.10))
+    assert down.factors["pt_2"] == pytest.approx(0.90)
+    assert down.factors["m_vis"] == pytest.approx(math.sqrt(0.90))
+    # slice labels line up with the datacard's {name}Up/Down template suffixes
+    assert up.slice_labels() == ["jtf_up"] and down.slice_labels() == ["jtf_down"]

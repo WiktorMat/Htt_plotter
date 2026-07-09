@@ -109,3 +109,91 @@ def test_expr_is_picklable_via_source() -> None:
     parsed = parse("pt_1 > 26")
     assert isinstance(parsed, Expr)
     assert parse(parsed.source).columns == parsed.columns
+
+
+# ------------------------------------------------- widened read filters
+
+
+def test_widened_arrow_superset(table: pa.Table) -> None:
+    """Every row passing the selection with scaled columns (any factor within
+    bounds) must pass the widened read filter."""
+    from wham.expr import widened_arrow
+
+    parsed = parse("pt_1 > 26 & abs(eta_1) < 2.4 & iso_1 < 0.15")
+    bounds = {"pt_1": (0.9, 1.1), "eta_1": (0.9, 1.1)}
+    filt = widened_arrow(parsed, bounds)
+    assert filt is not None
+
+    indexed = table.append_column("idx", pa.array(np.arange(table.num_rows)))
+    picked = ds.dataset(indexed).to_table(filter=filt).column("idx").to_numpy()
+    wide = np.zeros(table.num_rows, dtype=bool)
+    wide[picked] = True
+
+    cols = {n: table.column(n).to_numpy() for n in ("pt_1", "eta_1", "iso_1")}
+    for s_pt in (0.9, 1.0, 1.1):
+        for s_eta in (0.9, 1.0, 1.1):
+            scaled = dict(cols, pt_1=cols["pt_1"] * s_pt, eta_1=cols["eta_1"] * s_eta)
+            mask = parsed.evaluate(scaled)
+            assert not np.any(mask & ~wide), (s_pt, s_eta)
+    # and it stays a filter: atoms on unscaled columns still cut
+    assert wide.sum() < table.num_rows
+
+
+def test_widened_arrow_bounds_math(table: pa.Table) -> None:
+    from wham.expr import widened_arrow
+
+    dataset = ds.dataset(table)
+    pt = table.column("pt_1").to_numpy()
+    eta = table.column("eta_1").to_numpy()
+
+    # lower bound relaxes by the max factor: pt_1 > 26 -> pt_1 > 26/1.1
+    n = dataset.to_table(filter=widened_arrow(parse("pt_1 > 26"),
+                                              {"pt_1": (0.9, 1.1)})).num_rows
+    assert n == int((pt > 26 / 1.1).sum())
+
+    # upper bound relaxes by the min factor; constant-on-the-left mirrored
+    n = dataset.to_table(filter=widened_arrow(parse("26 > pt_1"),
+                                              {"pt_1": (0.9, 1.1)})).num_rows
+    assert n == int((pt < 26 / 0.9).sum())
+
+    # abs() is scale-covariant for positive factors
+    n = dataset.to_table(filter=widened_arrow(parse("abs(eta_1) < 2.4"),
+                                              {"eta_1": (0.9, 1.1)})).num_rows
+    assert n == int((np.abs(eta) < 2.4 / 0.9).sum())
+
+    # negative constant on a lower bound relaxes by the MIN factor
+    n = dataset.to_table(filter=widened_arrow(parse("eta_1 > -2.4"),
+                                              {"eta_1": (0.9, 1.1)})).num_rows
+    assert n == int((eta > -2.4 / 0.9).sum())
+
+
+def test_widened_arrow_drops_unwidenable(table: pa.Table) -> None:
+    from wham.expr import widened_arrow
+
+    dataset = ds.dataset(table)
+    pt = table.column("pt_1").to_numpy()
+
+    # == on a scaled column can't be relaxed: dropped, the pt atom survives
+    filt = widened_arrow(parse("id_2 == 3 & pt_1 > 26"), {"id_2": (0.9, 1.1)})
+    assert dataset.to_table(filter=filt).num_rows == int((pt > 26).sum())
+
+    # an OR-group touching a scaled column is one atom: dropped whole
+    assert widened_arrow(parse("(pt_1 > 26) | (iso_1 < 0.1)"),
+                         {"pt_1": (0.9, 1.1)}) is None
+
+    # everything dropped -> None (caller reads unfiltered)
+    assert widened_arrow(parse("id_2 == 3"), {"id_2": (0.9, 1.1)}) is None
+
+    # untouched expressions pass through exactly
+    filt = widened_arrow(parse("pt_1 > 26"), {"m_vis": (0.9, 1.1)})
+    assert dataset.to_table(filter=filt).num_rows == int((pt > 26).sum())
+
+
+def test_column_bounds() -> None:
+    from wham.expr import column_bounds
+
+    e = parse("id_2 == 1 & iso_1 > 0.15 & pt_1 >= 20 & pt_1 < 30")
+    assert column_bounds(e, "pt_1") == (20.0, 30.0)
+    assert column_bounds(e, "iso_1") == (0.15, None)
+    assert column_bounds(e, "id_2") == (None, None)   # == is not a window
+    assert column_bounds(parse("20 <= pt_1 & 30 > pt_1"), "pt_1") == (20.0, 30.0)

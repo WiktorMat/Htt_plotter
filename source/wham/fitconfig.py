@@ -114,13 +114,21 @@ class PoiCfg(_Model):
         return self
 
 
+def _scale_exprs(scale: "str | dict[str, str]") -> list[str]:
+    """The yield expressions of a scale, whether shared or per-category."""
+    return [scale] if isinstance(scale, str) else list(scale.values())
+
+
 class ComponentCfg(_Model):
     weight: str  # per-event weight column/expression for this template
-    scale: str   # yield expression in the POIs
+    # yield expression in the POIs, or a {category: expression} map to scale
+    # this template differently per datacard bin (e.g. a per-bin SF POI)
+    scale: str | dict[str, str]
 
 
 class ProcessModelCfg(_Model):
-    scale: str | None = None                        # single template
+    # single template: a shared expression, or {category: expression} per bin
+    scale: str | dict[str, str] | None = None
     components: dict[str, ComponentCfg] | None = None  # weighted templates
 
     @model_validator(mode="after")
@@ -132,21 +140,68 @@ class ProcessModelCfg(_Model):
         return self
 
 
+class GridCfg(_Model):
+    from_: float = Field(alias="from")  # template grid start (TES factor f)
+    to: float
+    step: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "GridCfg":
+        if not self.from_ < self.to:
+            raise ValueError(f"grid 'from' must be < 'to', got [{self.from_}, {self.to}]")
+        if self.from_ <= 0:
+            raise ValueError(f"grid 'from' must be > 0 (a scale factor), got {self.from_}")
+        return self
+
+
+class MorphCfg(_Model):
+    """A continuous shape-morphing POI (TES): at each template grid point f
+    the listed columns are scaled by f (linear: momenta) or sqrt(f)
+    (invariant masses, TauFW m_vis convention) BEFORE the selection and
+    observables are evaluated. Cuts on scaled columns therefore migrate
+    events across category edges (pt_2 bins) and scaled observables shift
+    (m_vis), so both shape and yield vary along the grid. Realized as a
+    combine CMSHistFunc, which interpolates template integrals in f."""
+
+    process: str               # analysis (kind=mc) process whose shape morphs
+    grid: GridCfg              # template points in f
+    categories: list[str] = Field(min_length=1)  # bins this morph acts in
+    # column -> scaling law at grid point f, e.g. {m_vis: sqrt, pt_2: linear}
+    scales: dict[str, Literal["sqrt", "linear"]] = Field(min_length=1)
+    init: float = 1.0
+    range: tuple[float, float]
+
+    @model_validator(mode="after")
+    def _ranges(self) -> "MorphCfg":
+        lo, hi = self.range
+        if not lo < hi:
+            raise ValueError(f"morph range must be increasing, got [{lo}, {hi}]")
+        if not lo <= self.init <= hi:
+            raise ValueError(f"morph init {self.init} outside range [{lo}, {hi}]")
+        return self
+
+
 class ModelCfg(_Model):
     pois: dict[str, PoiCfg]
     processes: dict[str, ProcessModelCfg]
+    # continuous shape-morphing POIs (e.g. TES per decay mode)
+    morphs: dict[str, MorphCfg] = {}
 
     @model_validator(mode="after")
     def _consistent(self) -> "ModelCfg":
-        if not self.pois:
-            raise ValueError("model.pois must declare at least one POI")
+        if not self.pois and not self.morphs:
+            raise ValueError("model must declare at least one POI (pois or morphs)")
         if not self.processes:
             raise ValueError("model.processes must scale at least one process")
+        clash = set(self.pois) & set(self.morphs)
+        if clash:
+            raise ValueError(f"names used as both POI and morph: {sorted(clash)}")
         pois = list(self.pois)
         used: set[str] = set()
         for proc, pm in self.processes.items():
-            scales = ([pm.scale] if pm.scale is not None
-                      else [c.scale for c in pm.components.values()])
+            raw = ([pm.scale] if pm.scale is not None
+                   else [c.scale for c in pm.components.values()])
+            scales = [e for s in raw for e in _scale_exprs(s)]
             for scale in scales:
                 try:
                     _, deps = translate_formula(scale, pois)
@@ -205,29 +260,43 @@ class SystematicCfg(_Model):
     init: float = 1.0  # rateParam starting value
     range: tuple[float, float] | None = None  # rateParam bounds, e.g. [0.1, 5]
     # shape only: replacement expressions for the per-event weight (or, when
-    # the pattern matches the QCD process, for qcd.ff_weight)
+    # the pattern matches the QCD process, for qcd.ff_weight) ...
     weight_up: str | None = None
     weight_down: str | None = None
+    # ... OR a column shift: the matched (kind=mc) processes are refilled with
+    # these columns scaled by (1 +- shift) (law per column, as in a morph's
+    # `scales`) — an energy-scale nuisance for fake taus, cuts re-evaluated on
+    # the shifted values (bin migration included)
+    scales: dict[str, Literal["sqrt", "linear"]] | None = None
+    shift: float | None = Field(default=None, gt=0, lt=1)
 
     @model_validator(mode="after")
     def _fields_match_effect(self) -> "SystematicCfg":
         has_weights = self.weight_up is not None or self.weight_down is not None
+        has_scales = self.scales is not None or self.shift is not None
         if self.effect == "lnN":
             if self.scaleFactor is None:
                 raise ValueError(f"systematic '{self.name}': lnN needs a scaleFactor")
             if self.range is not None or self.init != 1.0:
                 raise ValueError(f"systematic '{self.name}': init/range are rateParam-only")
-            if has_weights:
-                raise ValueError(f"systematic '{self.name}': weight_up/down are shape-only")
+            if has_weights or has_scales:
+                raise ValueError(
+                    f"systematic '{self.name}': weight_up/down and scales/shift are shape-only"
+                )
         elif self.effect == "rateParam":
             if self.scaleFactor is not None:
                 raise ValueError(f"systematic '{self.name}': rateParam takes no scaleFactor")
-            if has_weights:
-                raise ValueError(f"systematic '{self.name}': weight_up/down are shape-only")
-        else:  # shape
-            if self.weight_up is None or self.weight_down is None:
+            if has_weights or has_scales:
                 raise ValueError(
-                    f"systematic '{self.name}': shape needs weight_up and weight_down"
+                    f"systematic '{self.name}': weight_up/down and scales/shift are shape-only"
+                )
+        else:  # shape
+            weights_ok = self.weight_up is not None and self.weight_down is not None
+            scales_ok = self.scales and self.shift is not None
+            if weights_ok == bool(scales_ok):
+                raise ValueError(
+                    f"systematic '{self.name}': shape needs either weight_up/weight_down "
+                    "or scales+shift (a column-shift energy scale), not both"
                 )
             if self.scaleFactor is not None or self.range is not None or self.init != 1.0:
                 raise ValueError(
@@ -250,6 +319,15 @@ class ToyCfg(_Model):
 
 class CombineCfg(_Model):
     image: str = DEFAULT_COMBINE_IMAGE
+    # Path to a CMSSW release with combine + CombineHarvester built. REQUIRED
+    # only for fits that declare a TES `morph`: those run under this cmsenv
+    # instead of the standalone `image`, because the continuous morph must be a
+    # combine-native CMSHistFunc (built by CombineHarvester's
+    # BuildCMSHistFuncFactory) for autoMCStats to work — the RooMomentMorph used
+    # by the container backend lacks getXVar() and crashes autoMCStats. Without
+    # autoMCStats the postfit is not one-to-one. Plain (morph-free) fits ignore
+    # this and use the container. See Configurations/tau_sf/README.md.
+    cmssw: str | None = None
 
 
 class FitConfig(_Model):
@@ -269,10 +347,30 @@ class FitConfig(_Model):
         names = [c.name for c in self.categories]
         if len(set(names)) != len(names):
             raise ValueError(f"duplicate category names: {names}")
-        templates = list(scale_map(self).keys())
+        templates = [t for proc in self.model.processes for t in template_names(self, proc)]
         if len(set(templates)) != len(templates):
             raise ValueError(f"model template names collide after sanitization: {templates}")
-        pois = set(self.model.pois)
+        # per-category scale maps may only reference declared categories
+        cat_set = set(names)
+        for proc, pm in self.model.processes.items():
+            raw = [pm.scale] if pm.components is None else [
+                c.scale for c in pm.components.values()]
+            for s in raw:
+                if isinstance(s, dict):
+                    unknown = set(s) - cat_set
+                    if unknown:
+                        raise ValueError(
+                            f"model process '{proc}': scale maps unknown categories "
+                            f"{sorted(unknown)} (categories: {sorted(cat_set)})"
+                        )
+        for mname, morph in self.model.morphs.items():
+            unknown = set(morph.categories) - cat_set
+            if unknown:
+                raise ValueError(
+                    f"morph '{mname}' restricted to unknown categories "
+                    f"{sorted(unknown)} (categories: {sorted(cat_set)})"
+                )
+        pois = set(self.model.pois) | set(self.model.morphs)
         for scan in self.scans or []:
             missing = set(scan.pois) - pois
             if missing:
@@ -298,7 +396,7 @@ class FitConfig(_Model):
     def resolved_scans(self) -> list[ScanCfg]:
         if self.scans is not None:
             return self.scans
-        return [ScanCfg(pois=[p]) for p in self.model.pois]
+        return [ScanCfg(pois=[p]) for p in all_pois(self)]
 
 
 # ------------------------------------------------------------- derived
@@ -312,15 +410,25 @@ def template_names(fit: FitConfig, process: str) -> list[str]:
     return [dc_name(process)]
 
 
-def scale_map(fit: FitConfig) -> dict[str, str]:
-    """Datacard template name -> yield-scale expression."""
-    out: dict[str, str] = {}
+def scale_entries(fit: FitConfig) -> list[tuple[str | None, str, str]]:
+    """(category | None, datacard template name, yield-scale expression).
+
+    category=None: the expression applies in every datacard bin. A per-category
+    `scale` map yields one entry per listed category (so the same template can be
+    scaled by a different POI in each bin, e.g. a per-(DM,pT) ID scale factor)."""
+
+    def expand(scale: str | dict[str, str], tmpl: str) -> list[tuple[str | None, str, str]]:
+        if isinstance(scale, str):
+            return [(None, tmpl, scale)]
+        return [(cat, tmpl, expr) for cat, expr in scale.items()]
+
+    out: list[tuple[str | None, str, str]] = []
     for proc, pm in fit.model.processes.items():
         if pm.components is not None:
             for comp, c in pm.components.items():
-                out[dc_name(f"{proc}_{comp}")] = c.scale
+                out += expand(c.scale, dc_name(f"{proc}_{comp}"))
         else:
-            out[dc_name(proc)] = pm.scale
+            out += expand(pm.scale, dc_name(proc))
     return out
 
 
@@ -365,23 +473,36 @@ def fit_families(fit: FitConfig) -> list[str]:
 def shape_affected(fit: FitConfig, cfg: AnalysisConfig, syst: SystematicCfg) -> set[str]:
     """Config processes whose templates move under a shape systematic.
     A varied MC weight also shifts the data-driven QCD estimate through the
-    anti-iso subtraction, so the QCD process is always included."""
+    anti-iso subtraction, so the QCD process is included — EXCEPT for column
+    shifts (scales+shift): a shifted MC subtraction can collapse the small
+    QCD remainder to zero (or balloon it) in low-stat bins, and the violent
+    vertical morph then drives channel pdfs negative. The QCD template stays
+    nominal there; its rate lnNs cover the subtraction uncertainty."""
     qcd_proc = cfg.qcd_process()
     matched_mc = {p for p, pc in cfg.processes.items()
                   if pc.kind == "mc" and syst_matches(syst.processes, p)}
     if matched_mc:
+        if syst.scales is not None:
+            return matched_mc
         return matched_mc | ({qcd_proc} if qcd_proc is not None else set())
     return {qcd_proc} if qcd_proc is not None else set()
 
 
-def shape_variations(fit: FitConfig, cfg: AnalysisConfig) -> list[VariationCfg]:
+def shape_variations(fit: FitConfig, cfg: AnalysisConfig,
+                     category: str | None = None) -> list[VariationCfg]:
     """Resolve effect=shape systematics into concrete fill variations:
-    matched kind=mc processes get the replacement weight; matching the QCD
-    process instead varies qcd.ff_weight (the data-driven estimate)."""
+    matched kind=mc processes get the replacement weight (weight_up/down) or a
+    column-shift refill (scales+shift, e.g. a fake-τ energy scale); matching
+    the QCD process instead varies qcd.ff_weight (the data-driven estimate).
+    Restricted to `category` when given (a per-bin systematic, e.g. a fake ES
+    decorrelated across pT bins, only fills its own bin)."""
     out: list[VariationCfg] = []
     qcd_proc = cfg.qcd_process()
     for syst in fit.systematics:
         if syst.effect != "shape":
+            continue
+        if (category is not None and syst.categories is not None
+                and category not in syst.categories):
             continue
         matched_mc = [p for p, pc in cfg.processes.items()
                       if pc.kind == "mc" and syst_matches(syst.processes, p)]
@@ -391,6 +512,20 @@ def shape_variations(fit: FitConfig, cfg: AnalysisConfig) -> list[VariationCfg]:
                 f"shape systematic '{syst.name}' matches both MC processes "
                 f"({matched_mc}) and the QCD process — split it in two"
             )
+        if syst.scales is not None:
+            if not matched_mc:
+                raise ValueError(
+                    f"shape systematic '{syst.name}': scales/shift needs kind=mc "
+                    "processes (the data-driven QCD process has no columns to shift)"
+                )
+            for direction, f in (("up", 1 + syst.shift), ("down", 1 - syst.shift)):
+                out.append(VariationCfg(
+                    name=f"{syst.name}_{direction}", target="columns",
+                    processes=matched_mc,
+                    factors={col: (f ** 0.5 if law == "sqrt" else float(f))
+                             for col, law in syst.scales.items()},
+                ))
+            continue
         if matches_qcd:
             if cfg.qcd.method != "ff":
                 raise ValueError(
@@ -414,6 +549,52 @@ def shape_variations(fit: FitConfig, cfg: AnalysisConfig) -> list[VariationCfg]:
     return out
 
 
+def all_pois(fit: FitConfig) -> list[str]:
+    """Every parameter of interest: rate-scale POIs then shape-morph POIs."""
+    return list(fit.model.pois) + list(fit.model.morphs)
+
+
+def grid_points(grid: "GridCfg") -> list[float]:
+    """Template grid f-values, inclusive of both ends."""
+    n = round((grid.to - grid.from_) / grid.step)
+    return [round(grid.from_ + i * grid.step, 10) for i in range(n + 1)]
+
+
+def fpoint_str(f: float) -> str:
+    """Datacard-safe label for a grid point, e.g. 1.005 -> '1p005'."""
+    return f"{f:.3f}".replace(".", "p").replace("-", "m")
+
+
+def morph_point_label(morph_name: str, f: float) -> str:
+    return f"{morph_name}__{fpoint_str(f)}"
+
+
+def morph_factors(morph: "MorphCfg", f: float) -> dict[str, float]:
+    """Per-column scale factors at grid point f (sqrt(f) or f per law)."""
+    return {col: (f ** 0.5 if law == "sqrt" else float(f))
+            for col, law in morph.scales.items()}
+
+
+def morph_variations(fit: FitConfig, category: str | None = None) -> list[VariationCfg]:
+    """Column-scale fill variations realizing the morph template grids.
+    Restricted to `category` when given (each category only needs its own
+    morphs' grid slices). The nominal point f=1.0 is the nominal template."""
+    out: list[VariationCfg] = []
+    for mname, morph in fit.model.morphs.items():
+        if category is not None and category not in morph.categories:
+            continue
+        for f in grid_points(morph.grid):
+            if abs(f - 1.0) < 1e-9:
+                continue
+            out.append(VariationCfg(
+                name=morph_point_label(mname, f),
+                target="columns",
+                processes=[morph.process],
+                factors=morph_factors(morph, f),
+            ))
+    return out
+
+
 def _component_fills(fit: FitConfig, variable: str) -> list[ComponentFillCfg]:
     return [
         ComponentFillCfg(
@@ -432,7 +613,8 @@ def category_analysis(fit: FitConfig, cfg: AnalysisConfig, cat: CategoryCfg) -> 
     plots = PlotsCfg(datamc=[cat.variable], fitcp=_component_fills(fit, cat.variable))
     return cfg.model_copy(update={
         "selection": selection, "plots": plots,
-        "variations": shape_variations(fit, cfg),
+        "variations": (shape_variations(fit, cfg, cat.name)
+                       + morph_variations(fit, cat.name)),
     })
 
 
@@ -538,6 +720,37 @@ def load_fit_config(path: str | Path) -> tuple[FitConfig, AnalysisConfig]:
                         f"invalid weight: {e}"
                     ) from None
 
+    for mname, morph in fit.model.morphs.items():
+        pcfg = cfg.processes.get(morph.process)
+        if pcfg is None:
+            raise ValueError(
+                f"morph '{mname}': process '{morph.process}' is not a process of "
+                f"'{fit.analysis}' ({sorted(cfg.processes)})"
+            )
+        if pcfg.kind != "mc":
+            raise ValueError(
+                f"morph '{mname}': process '{morph.process}' must be kind=mc "
+                f"(got kind={pcfg.kind}) to carry a TES grid"
+            )
+
+    if fit.model.morphs:
+        # the morph pdf lives on combine's CMS_th1x, which is one observable
+        # padded to the largest channel's bin count, so every category must
+        # share the same observable binning for the morph to align
+        def _nbins(var: str) -> int:
+            v = cfg.variables[var]
+            if v.unroll is not None:
+                x, y = v.unroll
+                return (len(cfg.variables[x].edges()) - 1) * (len(cfg.variables[y].edges()) - 1)
+            return len(v.edges()) - 1
+
+        nbins = {c.name: _nbins(c.variable) for c in fit.categories}
+        if len(set(nbins.values())) != 1:
+            raise ValueError(
+                "TES morphing requires all categories to share one observable "
+                f"binning (combine uses a single CMS_th1x); got {nbins}"
+            )
+
     if cfg.data_process() is None:
         raise ValueError(f"analysis '{fit.analysis}' has no kind=data process")
 
@@ -550,7 +763,7 @@ def load_fit_config(path: str | Path) -> tuple[FitConfig, AnalysisConfig]:
                 f"systematic '{syst.name}' matches no datacard process "
                 f"(patterns {syst.processes}, processes {all_dc})"
             )
-        if syst.effect == "shape":
+        if syst.effect == "shape" and syst.weight_up is not None:
             for label, src in (("weight_up", syst.weight_up),
                                ("weight_down", syst.weight_down)):
                 try:

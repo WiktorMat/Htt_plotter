@@ -4,6 +4,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 markers = [
-    "combine: integration tests that run the standalone Combine container",
+    "combine: integration tests that run Combine (standalone container or CMSSW cmsenv)",
 ]
 addopts = "-m 'not combine'"

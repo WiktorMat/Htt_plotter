@@ -70,6 +70,8 @@ processes:                       # YAML order = stack draw order
   QCD:  {kind: qcd, color: "tab:olive"}            # derived, no samples
   tt:   {samples: ["TTto*", "ST_tW_*"], color: "tab:purple"}
   data: {kind: data, samples: ["Muon0_*", "Muon1_*"], color: black}
+# a sample may feed SEVERAL processes when every one declares a disjoint
+# per-event `cut` (a genmatch split, e.g. tt -> genuine / l-fake / jet-fake)
 
 qcd:
   method: abcd                   # or: ss (with ff)
@@ -185,15 +187,25 @@ A fit config declares:
   scaled whole (`{scale: "r"}`) or split into weighted template components,
   each with its own per-event weight column and scale expression. Anything
   not listed is a plain background.
+- **model.morphs** — continuous shape-morphing POIs (e.g. a τ energy
+  scale): a grid of template points in `f` where the listed columns are
+  scaled by `f` (`linear`) or `sqrt(f)` before the selection is evaluated
+  (`scales: {m_vis: sqrt, pt_2: linear}`) — cuts on scaled columns migrate
+  events across category edges, so both shape and yield vary along the
+  grid. The parquet read window widens automatically; combine morphs the
+  templates as a `CMSHistFunc` (requires `combine.cmssw`, see below).
 - **systematics** — `lnN` (with `scaleFactor`), `rateParam` (free-floating
   normalization, one shared parameter across everything it matches) and
-  `shape` (weight-based template variations: `weight_up`/`weight_down`
-  expressions replace the per-event weight of the matched MC processes —
-  the variation also propagates into the QCD subtraction — or, matching
-  the QCD process, replace `qcd.ff_weight` to vary the data-driven
-  estimate). Optional `categories:` restricts one to specific bins.
-  Patterns match the config process names (`W+jets` etc.); sanitization and
-  component templates are resolved internally.
+  `shape` in two flavors: `weight_up`/`weight_down` expressions replace
+  the per-event weight of the matched MC processes (the variation also
+  propagates into the QCD subtraction — or, matching the QCD process,
+  replaces `qcd.ff_weight`); alternatively `scales:` + `shift:` refill the
+  matched processes with columns scaled by (1 ± shift) — a constrained
+  fake-τ energy scale with the same cut-migration mechanics as a morph
+  (this flavor leaves the data-driven QCD template nominal). Optional
+  `categories:` restricts one to specific bins. Patterns match the config
+  process names (`W+jets` etc.); sanitization and component templates are
+  resolved internally.
 - **scans** — 1D entries give profiled −2ΔlnL curves, two-POI entries a
   −2ΔlnL heatmap with 68/95% CL contours. Windows auto-center on the best
   fit (± 10σ) unless `range`/`ranges` is given; omitted entirely → one 1D
@@ -234,7 +246,15 @@ pulls plot with per-POI impact columns (covariance approximation; numbers in
 
 Every stage is keyed: editing a systematic re-exports and refits in seconds
 without touching event data; rerunning with nothing changed only re-renders.
-Flags: `--datacard-only`, `--force`, `--no-render`.
+Flags: `--datacard-only`, `--force`, `--no-render`. The `pois` plot overlays
+the FitDiagnostics values with the scan-profile intervals — the two must
+agree, and a console warning flags a local-minimum fit when they don't.
+
+`wham fitsummary <fit1> <fit2> ... [--var pt_2] [--label "..."]` overlays
+the POIs of several finished fits on one canvas: per-category rate POIs vs
+the window their category cut puts on `--var` (e.g. ID SFs vs pT, one series
+per decay mode) plus the morph POIs per fit, with profile errors where scans
+exist. It only reads existing fit outputs.
 
 
 ## Repository layout

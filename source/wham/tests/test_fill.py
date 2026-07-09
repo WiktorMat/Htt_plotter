@@ -198,6 +198,43 @@ def test_unrolled_fill_matches_2d_reference(workspace: dict) -> None:
     assert np.allclose(got, ref2d.T.reshape(-1))
 
 
+def test_process_cut_filters_events(workspace: dict) -> None:
+    cfg = load_config(workspace["yaml"])
+    # an extra per-event mask on the DY process only (a genmatch cut stand-in)
+    procs = dict(cfg.processes)
+    procs["DY"] = procs["DY"].model_copy(update={"cut": "id_2 >= 4"})
+    cfg = cfg.model_copy(update={"processes": procs})
+    assert "id_2" in cfg.required_columns()  # the cut's column gets skimmed
+
+    samples, _ = discover_samples(cfg)
+    skims = ensure_skims(cfg, samples, workers=1)
+    spec = build_fill_spec(cfg, families=["datamc"], only_vars=("m_vis",))
+    assert ("DY", "id_2 >= 4") in spec.process_cuts
+
+    hists: dict = {}
+    for s in samples:
+        merge_hists(hists, fill_sample(s, skims[s.name], spec))
+    h = hists[("datamc", "m_vis")]
+
+    # DY: only id_2 >= 4 events survive, in every region it fills
+    sample = next(s for s in samples if s.name == "DY_test")
+    df = _reference_frame(sample, cfg)
+    df = df[(df.trg == 1) & (df.m_vis >= 0) & (df.m_vis < 250)]
+    expect = df[(df.os == 1) & (df.id_2 >= 5) & (df.id_2 >= 4)].w.sum()
+    got = float(h[{"process": "DY", "region": "OS_iso",
+                   "variation": "nominal"}].view()["value"].sum())
+    assert got == pytest.approx(expect, rel=1e-9)
+
+    # data carries no cut -> unaffected
+    data = next(s for s in samples if s.kind == "data")
+    ddf = _reference_frame(data, cfg)
+    ddf = ddf[(ddf.trg == 1) & (ddf.m_vis >= 0) & (ddf.m_vis < 250)]
+    d_expect = float(((ddf.os == 1) & (ddf.id_2 >= 5)).sum())
+    d_got = float(h[{"process": "data", "region": "OS_iso",
+                     "variation": "nominal"}].view()["value"].sum())
+    assert d_got == pytest.approx(d_expect)
+
+
 def test_weight_variation_fills_and_completion(workspace: dict) -> None:
     from wham.config import VariationCfg
     from wham.fill import complete_variation_slices
@@ -272,6 +309,130 @@ def test_qcd_ff_variation(workspace: dict) -> None:
     assert total("OS_antiiso", "ffv_down") == pytest.approx(
         float((df.w * df.pt_2 / 200)[anti].sum()), rel=1e-9)
     assert total("OS_iso", "ffv_up") == total("OS_iso", "nominal")
+
+
+def test_columns_variation_scales_observable(workspace: dict) -> None:
+    from wham.config import VariationCfg
+    from wham.fill import complete_variation_slices
+
+    cfg = load_config(workspace["yaml"])
+    cfg = cfg.model_copy(update={"variations": [VariationCfg(
+        name="tes", target="columns", processes=["DY"], factors={"m_vis": 0.9},
+    )]})
+    samples, _ = discover_samples(cfg)
+    skims = ensure_skims(cfg, samples, workers=1)
+    spec = build_fill_spec(cfg, families=["datamc"], only_vars=("m_vis",))
+
+    hists: dict = {}
+    for s in samples:
+        merge_hists(hists, fill_sample(s, skims[s.name], spec))
+    complete_variation_slices(spec, hists)
+
+    h = hists[("datamc", "m_vis")]
+    # one slice named by the variation itself (not _up/_down)
+    assert "tes" in list(h.axes["variation"])
+    assert "tes_up" not in list(h.axes["variation"])
+
+    # DY OS_iso 'tes' slice = histogram of (m_vis * 0.9); the selection has no
+    # m_vis cut, so the varied slice sees the same events with shifted values
+    sample = next(s for s in samples if s.name == "DY_test")
+    df = _reference_frame(sample, cfg)
+    sel = (df.trg == 1) & (df.os == 1) & (df.id_2 >= 5)
+    ref, _ = np.histogram(df.m_vis[sel] * 0.9, bins=25, range=(0, 250), weights=df.w[sel])
+    got = h[{"process": "DY", "region": "OS_iso", "variation": "tes"}].view()["value"]
+    assert np.allclose(got, ref)
+
+    def tot(proc: str, var: str) -> float:
+        return float(h[{"process": proc, "region": "OS_iso",
+                        "variation": var}].view()["value"].sum())
+
+    # x-axis rescale within range preserves the DY yield; shape moves
+    assert tot("DY", "tes") == pytest.approx(tot("DY", "nominal"), rel=1e-9)
+    assert not np.allclose(got, h[{"process": "DY", "region": "OS_iso",
+                                   "variation": "nominal"}].view()["value"])
+    # unmatched process completed to nominal
+    assert tot("TT", "tes") == tot("TT", "nominal")
+
+
+def test_columns_variation_migrates_selection(workspace: dict) -> None:
+    """Scaling a SELECTION column re-applies the cut on the shifted values:
+    events just below the pt_1 threshold enter the varied slice (migration),
+    while the nominal slice stays byte-identical to a variation-free fill."""
+    from wham.config import VariationCfg
+    from wham.fill import complete_variation_slices
+
+    cfg0 = load_config(workspace["yaml"])
+    cfg = cfg0.model_copy(update={"variations": [VariationCfg(
+        name="tes", target="columns", processes=["DY"],
+        factors={"pt_1": 1.1, "m_vis": 0.9},
+    )]})
+    samples, _ = discover_samples(cfg)
+    skims = ensure_skims(cfg, samples, workers=1)
+    spec = build_fill_spec(cfg, families=["datamc"], only_vars=("m_vis",))
+
+    hists: dict = {}
+    for s in samples:
+        merge_hists(hists, fill_sample(s, skims[s.name], spec))
+    complete_variation_slices(spec, hists)
+    h = hists[("datamc", "m_vis")]
+
+    # reference from the RAW parquet (no pre-selection): the widened read must
+    # recover events failing the nominal pt_1 > 25 but passing the shifted cut
+    sample = next(s for s in samples if s.name == "DY_test")
+    raw = pq.read_table(sample.path).to_pandas()
+    w = raw.weight * sample_scale(sample, cfg.lumi)
+    base = ((raw.eta_1.abs() < 2.4) & (raw.trg == 1) & (raw.os == 1)
+            & (raw.id_2 >= 5))
+    nom_sel = base & (raw.pt_1 > 25) & (raw.m_vis >= 0) & (raw.m_vis < 250)
+    var_sel = base & (raw.pt_1 * 1.1 > 25)
+
+    def tot(variation: str) -> float:
+        return float(h[{"process": "DY", "region": "OS_iso",
+                        "variation": variation}].view()["value"].sum())
+
+    assert tot("nominal") == pytest.approx(float(w[nom_sel].sum()), rel=1e-9)
+    ref, _ = np.histogram(raw.m_vis[var_sel] * 0.9, bins=25, range=(0, 250),
+                          weights=w[var_sel])
+    got = h[{"process": "DY", "region": "OS_iso", "variation": "tes"}].view()["value"]
+    assert np.allclose(got, ref)
+    assert tot("tes") > tot("nominal")  # migration in: pt_1 in (25/1.1, 25]
+
+    # samples not targeted by the variation keep the exact read path: their
+    # nominal contents match a variation-free fill exactly
+    spec0 = build_fill_spec(cfg0, families=["datamc"], only_vars=("m_vis",))
+    hists0: dict = {}
+    for s in samples:
+        merge_hists(hists0, fill_sample(s, skims[s.name], spec0))
+    h0 = hists0[("datamc", "m_vis")]
+    for proc in ("DY", "TT", "data"):
+        a = h[{"process": proc, "region": "OS_iso", "variation": "nominal"}].view()
+        b = h0[{"process": proc, "region": "OS_iso", "variation": "nominal"}].view()
+        assert np.array_equal(a["value"], b["value"]), proc
+
+
+def test_columns_variation_cache_key(workspace: dict) -> None:
+    """The per-column factors are part of the histogram cache key: changing
+    the grid point must never serve a stale histogram."""
+    from wham.config import VariationCfg
+    from wham.fill import spec_extras
+    from wham.histcache import cache_key
+
+    cfg = load_config(workspace["yaml"])
+    samples, _ = discover_samples(cfg)
+    skims = ensure_skims(cfg, samples, workers=1)
+    vcfg = cfg.variables["m_vis"].model_dump()
+
+    def key(factors: dict) -> str:
+        c = cfg.model_copy(update={"variations": [VariationCfg(
+            name="tes", target="columns", processes=["DY"], factors=factors,
+        )]})
+        spec = build_fill_spec(c, families=["datamc"], only_vars=("m_vis",))
+        extras = spec_extras(spec)
+        return cache_key(c, samples, skims, spec, "datamc", "m_vis", vcfg,
+                         extra=extras[("datamc", "m_vis")])
+
+    assert key({"m_vis": 0.9}) != key({"m_vis": 0.95})
+    assert key({"m_vis": 0.9}) != key({"m_vis": 0.9, "pt_1": 0.9})
 
 
 def test_fitcp_cache_key_includes_weight_columns(workspace: dict) -> None:

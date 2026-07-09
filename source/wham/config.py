@@ -90,6 +90,12 @@ class ProcessCfg(_Model):
     color: str = "tab:gray"
     kind: Literal["mc", "data", "qcd"] = "mc"
     label: str | None = None  # legend text; falls back to the process name
+    # extra per-event mask folded onto the selection for this process only,
+    # e.g. a genmatch requirement isolating genuine tau_h (genPartFlav_2 == 5)
+    # or excluding jet->tau_h fakes that the data-driven QCD estimate covers.
+    # Skipped for any sample whose skim lacks the referenced columns (so a
+    # genmatch cut on a process whose samples carry no gen info is a no-op).
+    cut: str | None = None
 
     @model_validator(mode="after")
     def _samples_match_kind(self) -> "ProcessCfg":
@@ -97,6 +103,8 @@ class ProcessCfg(_Model):
             raise ValueError("a kind=qcd process is derived and must not list samples")
         if self.kind != "qcd" and not self.samples:
             raise ValueError("process must list at least one sample pattern")
+        if self.kind == "qcd" and self.cut is not None:
+            raise ValueError("a kind=qcd process is data-derived and takes no 'cut'")
         return self
 
 
@@ -143,18 +151,48 @@ class ComponentFillCfg(_Model):
 
 
 class VariationCfg(_Model):
-    """A weight-based shape variation, filled into the histogram variation
-    axis as <name>_up / <name>_down. Set programmatically by `wham fit`.
+    """A shape variation filled into the histogram variation axis. Set
+    programmatically by `wham fit`, not written by hand.
 
-    target=weight: the expressions replace the per-event weight for the
-    listed (kind=mc) processes. target=qcd_ff: they replace qcd.ff_weight
-    in the anti-iso fills, varying the data-driven QCD estimate."""
+    target=weight: weight_up/down replace the per-event weight for the listed
+    (kind=mc) processes, filling <name>_up / <name>_down slices.
+    target=qcd_ff: weight_up/down replace qcd.ff_weight in the anti-iso fills,
+    varying the data-driven QCD estimate (<name>_up / <name>_down).
+    target=columns: a single <name> slice in which the listed processes are
+    refilled with the given columns multiplied by constant factors BEFORE the
+    selection and observables are evaluated — cuts on scaled columns migrate
+    events across their edges and scaled observables shift (one TES morph
+    grid point: m_vis*sqrt(f), pt_2*f)."""
 
     name: str
-    processes: list[str] = []  # concrete process names (target=weight)
-    weight_up: str
-    weight_down: str
-    target: Literal["weight", "qcd_ff"] = "weight"
+    processes: list[str] = []  # concrete process names (weight / columns)
+    target: Literal["weight", "qcd_ff", "columns"] = "weight"
+    weight_up: str | None = None
+    weight_down: str | None = None
+    factors: dict[str, float] = {}  # columns target: column -> scale factor
+
+    @model_validator(mode="after")
+    def _fields_match_target(self) -> "VariationCfg":
+        if self.target == "columns":
+            if not self.factors:
+                raise ValueError(f"variation '{self.name}': columns needs factors")
+            bad = {c: f for c, f in self.factors.items() if f <= 0}
+            if bad:
+                raise ValueError(f"variation '{self.name}': factors must be > 0, got {bad}")
+        else:
+            if self.factors:
+                raise ValueError(f"variation '{self.name}': factors are columns-only")
+            if self.weight_up is None or self.weight_down is None:
+                raise ValueError(
+                    f"variation '{self.name}': target={self.target} needs weight_up/weight_down"
+                )
+        return self
+
+    def slice_labels(self) -> list[str]:
+        """Histogram variation-axis labels this variation fills."""
+        if self.target == "columns":
+            return [self.name]
+        return [f"{self.name}_up", f"{self.name}_down"]
 
 
 class Display3DCfg(_Model):
@@ -263,6 +301,13 @@ class AnalysisConfig(_Model):
                 parse(src)
             except ExprError as e:
                 raise ValueError(f"invalid expression in '{label}': {e}") from None
+        for name, proc in self.processes.items():
+            if proc.cut is None:
+                continue
+            try:
+                parse(proc.cut)
+            except ExprError as e:
+                raise ValueError(f"invalid 'cut' for process '{name}': {e}") from None
         return self
 
     @model_validator(mode="after")
@@ -367,6 +412,9 @@ class AnalysisConfig(_Model):
                     self.qcd.os, self.qcd.iso, self.qcd.antiiso, self.qcd.ff_weight):
             if src:
                 cols |= parse(src).columns
+        for proc in self.processes.values():
+            if proc.cut:
+                cols |= parse(proc.cut).columns
         for reco, ref in self.plots.resolution:
             cols |= self.columns_of_var(reco) | self.columns_of_var(ref)
         for v in (*self.plots.datamc, *self.plots.ffcheck):
@@ -378,7 +426,9 @@ class AnalysisConfig(_Model):
             for weight in f.components.values():
                 cols |= parse(weight).columns
         for v in self.variations:
-            cols |= parse(v.weight_up).columns | parse(v.weight_down).columns
+            if v.weight_up is not None:
+                cols |= parse(v.weight_up).columns | parse(v.weight_down).columns
+            cols |= set(v.factors)
         if self.plots.display3d is not None:
             cols |= DISPLAY3D_COLUMNS
         if self.fake_factors is not None:
@@ -453,24 +503,34 @@ def discover_samples(
     )
 
     warnings: list[str] = []
-    assignment: dict[str, str] = {}
+    assignment: dict[str, list[str]] = {}
     for proc_name, proc in cfg.processes.items():
         for pattern in proc.samples:
             matched = fnmatch.filter(candidates, pattern)
             if not matched:
                 warnings.append(f"pattern '{pattern}' (process '{proc_name}') matched nothing")
             for sample_name in matched:
-                prev = assignment.get(sample_name)
-                if prev is not None and prev != proc_name:
-                    raise ValueError(
-                        f"sample '{sample_name}' matches both process '{prev}' and "
-                        f"'{proc_name}' — make the patterns disjoint"
-                    )
-                assignment[sample_name] = proc_name
+                procs = assignment.setdefault(sample_name, [])
+                if proc_name not in procs:
+                    procs.append(proc_name)
+
+    # a sample may feed several processes only when every one of them declares
+    # a per-event 'cut' (a genmatch split, e.g. tt -> genuine/l-fake/jet-fake);
+    # without cuts the overlap would double count events
+    for sample_name, procs in sorted(assignment.items()):
+        if len(procs) > 1:
+            uncut = [p for p in procs if cfg.processes[p].cut is None]
+            if uncut:
+                raise ValueError(
+                    f"sample '{sample_name}' matches processes {procs}; sharing a "
+                    f"sample requires a disjoint 'cut' on every one of them "
+                    f"(missing on: {uncut})"
+                )
 
     missing_params = [
-        s for s, p in sorted(assignment.items())
-        if cfg.processes[p].kind == "mc" and s not in cfg.sample_params
+        s for s, procs in sorted(assignment.items())
+        if any(cfg.processes[p].kind == "mc" for p in procs)
+        and s not in cfg.sample_params
     ]
     if missing_params:
         raise ValueError(
@@ -478,22 +538,22 @@ def discover_samples(
         )
 
     samples: list[Sample] = []
-    for sample_name, proc_name in sorted(assignment.items()):
-        kind = cfg.processes[proc_name].kind
+    for sample_name, procs in sorted(assignment.items()):
         path = cfg.data_dir / sample_name / variation / "merged.parquet"
         st = path.stat()
-        samples.append(
-            Sample(
-                name=sample_name,
-                process=proc_name,
-                kind=kind,
-                variation=variation,
-                path=path,
-                size=st.st_size,
-                mtime_ns=st.st_mtime_ns,
-                params=cfg.sample_params.get(sample_name),
+        for proc_name in procs:
+            samples.append(
+                Sample(
+                    name=sample_name,
+                    process=proc_name,
+                    kind=cfg.processes[proc_name].kind,
+                    variation=variation,
+                    path=path,
+                    size=st.st_size,
+                    mtime_ns=st.st_mtime_ns,
+                    params=cfg.sample_params.get(sample_name),
+                )
             )
-        )
     return samples, warnings
 
 
