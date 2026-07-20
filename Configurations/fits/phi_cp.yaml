@@ -1,0 +1,89 @@
+# WHAM Phi_CP Asimov fit template.
+#
+# This mirrors the TIDAL CP-datacard idea as closely as current WHAM fit YAML
+# allows: one or more CP-sensitive categories, an unrolled Phi_CP observable,
+# CP-even/CP-odd weighted signal templates, and an Asimov truth point.
+#
+# Current mutau_2024.yaml does not yet define Higgs signal processes such as
+# ggH/qqH. Add them to the analysis YAML before running this template, or replace
+# the model.processes keys below with the signal process names present there.
+# See phi_cp_report.md for the non-1:1 differences vs TIDAL.
+
+name: phi_cp_asimov
+analysis: mutau_2024_CP
+
+categories:
+  # TIDAL mt CP categories mapped onto columns available in test_file.parquet.
+  - name: mt_higgs_mupi
+    variable: MVA_vs_aco_mu_pi
+    cut: "BDT_pred_class == 1 & ip_LengthSig_1 > 1.0 & decayModePNet_2 == 0 & ip_LengthSig_2 >= 1.0"
+  - name: mt_higgs_murho
+    variable: MVA_vs_aco_mu_rho
+    cut: "BDT_pred_class == 1 & ip_LengthSig_1 > 1.0 & decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15"
+  - name: mt_higgs_mua11pr
+    variable: MVA_vs_aco_mu_rho
+    cut: "BDT_pred_class == 1 & ip_LengthSig_1 > 1.0 & decayMode_2 == 1 & decayModePNet_2 == 2 & pion_E_split_2 > 0.15"
+  - name: mt_higgs_mua1
+    variable: MVA_vs_aco_mu_a1
+    cut: "BDT_pred_class == 1 & ip_LengthSig_1 > 1.0 & decayModePNet_2 == 10 & hasRefitSV_2"
+
+model:
+  pois:
+    mu_ggH: {init: 1.0, range: [0.0, 5.0]}
+    mu_qqH: {init: 1.0, range: [0.0, 5.0]}
+    alpha:  {init: 0.0, range: [0.0, 1.5707963267948966]}
+  processes:
+    # Add corresponding processes to mutau_2024.yaml, with samples matching the
+    # Higgs inputs. The per-event CP weights must be present in the skims.
+    ggH:
+      components:
+        even: {weight: wt_cp_sm, scale: "mu_ggH * cos(alpha)^2"}
+        odd:  {weight: wt_cp_ps, scale: "mu_ggH * sin(alpha)^2"}
+        # Enable when an interference template is available and validated.
+        # mm: {weight: wt_cp_mm, scale: "mu_ggH * 2*sin(alpha)*cos(alpha)"}
+    qqH:
+      components:
+        even: {weight: wt_cp_sm, scale: "mu_qqH * cos(alpha)^2"}
+        odd:  {weight: wt_cp_ps, scale: "mu_qqH * sin(alpha)^2"}
+        # mm: {weight: wt_cp_mm, scale: "mu_qqH * 2*sin(alpha)*cos(alpha)"}
+
+systematics:
+  # Minimal WHAM-side placeholders. TIDAL carries many more CP datacard
+  # systematics; keep only those already expressible with current WHAM inputs.
+  - {name: lumi_13p6TeV, effect: lnN, processes: [ggH, qqH, tt, dibosons, "W+jets", "DY_*"], scaleFactor: 1.025}
+  - {name: norm_qcd,     effect: rateParam, processes: [QCD], range: [0.1, 5.0]}
+
+  # Existing example-style shape systematics. Keep or remove depending on which
+  # columns are available in the real input skim.
+  - name: top_pt_reweight
+    effect: shape
+    processes: [tt]
+    weight_up:   "weight * w_Top_pt_Reweighting"
+    weight_down: "weight / w_Top_pt_Reweighting"
+
+  # This QCD fake-factor shape requires qcd.method=ff. mutau_2024 currently uses
+  # qcd.method=abcd, so leave it commented unless the analysis YAML is switched.
+  # - name: ff_qcd_stat
+  #   effect: shape
+  #   processes: [QCD]
+  #   weight_up:   "BDT_FF_score_QCD_sublead * FF_qcd_ipcut_up / FF_qcd_ipcut_nom"
+  #   weight_down: "BDT_FF_score_QCD_sublead * FF_qcd_ipcut_down / FF_qcd_ipcut_nom"
+
+scans:
+  - {pois: [alpha], points: 80, range: [0.0, 1.5707963267948966]}
+  - {pois: [alpha, mu_ggH], points: 40,
+     ranges: [[0.0, 1.5707963267948966], [0.0, 3.0]]}
+  - {pois: [alpha, mu_qqH], points: 40,
+     ranges: [[0.0, 1.5707963267948966], [0.0, 3.0]]}
+
+asimov:
+  enabled: true
+  # SM Asimov truth. For a CP-mixed injection, set e.g. alpha: 0.4.
+  parameters: {mu_ggH: 1.0, mu_qqH: 1.0, alpha: 0.0}
+
+toy: {asymmetry: 0.0}
+
+auto_mc_stats: 10
+
+# combine:
+#   image: /cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/cms-cloud/combine-standalone:latest
