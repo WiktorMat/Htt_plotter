@@ -1,0 +1,49 @@
+# Export-only WHAM template for the WHAM -> Combine_HtautauCP workflow.
+#
+# Run with:
+#   wham fit Configurations/fits/phi_cp_combine_export.yaml --shapes-only
+#
+# WHAM writes nominal shapes and stages them for Combine_HtautauCP. The final
+# datacards, workspace and alpha scan are produced by the external repo.
+
+name: phi_cp_combine_export
+analysis: mutau_2024_CP
+
+categories:
+  - name: mt_higgs_murho_mTLt65
+    variable: MVA_vs_aco_mu_rho
+    cut: "BDT_pred_class == 1 & ip_LengthSig_1 > 1.0 & decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15"
+  - name: mt_higgs_mupi_mTLt65
+    variable: MVA_vs_aco_mu_pi
+    cut: "BDT_pred_class == 1 & ip_LengthSig_1 > 1.0 & decayModePNet_2 == 0 & ip_LengthSig_2 >= 1.0"
+  - name: mt_higgs_mua1_mTLt65
+    variable: MVA_vs_aco_mu_a1
+    cut: "BDT_pred_class == 1 & ip_LengthSig_1 > 1.0 & decayModePNet_2 == 10 & hasRefitSV_2"
+  - name: mt_higgs_mua11pr_mTLt65
+    variable: MVA_vs_aco_mu_rho
+    cut: "BDT_pred_class == 1 & ip_LengthSig_1 > 1.0 & decayMode_2 == 1 & decayModePNet_2 == 2 & pion_E_split_2 > 0.15"
+
+model:
+  pois:
+    alpha: {init: 0.0, range: [0.0, 1.0]}
+  processes:
+    ggH:
+      components:
+        # The dummy alpha dependence keeps the current WHAM model validator happy.
+        # Combine_HtautauCP owns the real alpha scaling.
+        sm_prod_sm_htt125: {weight: wt_cp_sm, scale: "alpha*0 + 1"}
+        ps_prod_sm_htt125: {weight: wt_cp_ps, scale: "alpha*0 + 1"}
+
+systematics: []
+scans:
+  - {pois: [alpha], points: 80, range: [0.0, 1.0]}
+asimov: {enabled: false}
+toy: {asymmetry: 0.0}
+auto_mc_stats: null
+
+export:
+  target: combine_htautaucp
+  stage_dir: external_examples/Combine_HtautauCP/cpdatacards/wham_phi_cp
+  output_file: added_histo_mt-mergeXbins.root
+  write_native_datacard: false
+  write_manifest: true

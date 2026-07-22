@@ -29,61 +29,29 @@ categories:
 
 model:
   pois:
-    mu_ggH: {init: 1.0, range: [0.0, 5.0]}
-    mu_qqH: {init: 1.0, range: [0.0, 5.0]}
-    alpha:  {init: 0.0, range: [0.0, 1.5707963267948966]}
+    alpha: {init: 0.0, range: [0.0, 1.0]}
   processes:
     # Add corresponding processes to mutau_2024.yaml, with samples matching the
     # Higgs inputs. The per-event CP weights must be present in the skims.
     ggH:
       components:
-        even: {weight: wt_cp_sm, scale: "mu_ggH * cos(alpha)^2"}
-        odd:  {weight: wt_cp_ps, scale: "mu_ggH * sin(alpha)^2"}
-        # Enable when an interference template is available and validated.
-        # mm: {weight: wt_cp_mm, scale: "mu_ggH * 2*sin(alpha)*cos(alpha)"}
-    qqH:
-      components:
-        even: {weight: wt_cp_sm, scale: "mu_qqH * cos(alpha)^2"}
-        odd:  {weight: wt_cp_ps, scale: "mu_qqH * sin(alpha)^2"}
-        # mm: {weight: wt_cp_mm, scale: "mu_qqH * 2*sin(alpha)*cos(alpha)"}
+        even: {weight: wt_cp_sm, scale: "1 - alpha"}
+        odd:  {weight: wt_cp_ps, scale: "alpha"}
 
-systematics:
-  # Minimal WHAM-side placeholders. TIDAL carries many more CP datacard
-  # systematics; keep only those already expressible with current WHAM inputs.
-  - {name: lumi_13p6TeV, effect: lnN, processes: [ggH, qqH, tt, dibosons, "W+jets", "DY_*"], scaleFactor: 1.025}
-  - {name: norm_qcd,     effect: rateParam, processes: [QCD], range: [0.1, 5.0]}
-
-  # Existing example-style shape systematics. Keep or remove depending on which
-  # columns are available in the real input skim.
-  - name: top_pt_reweight
-    effect: shape
-    processes: [tt]
-    weight_up:   "weight * w_Top_pt_Reweighting"
-    weight_down: "weight / w_Top_pt_Reweighting"
-
-  # This QCD fake-factor shape requires qcd.method=ff. mutau_2024 currently uses
-  # qcd.method=abcd, so leave it commented unless the analysis YAML is switched.
-  # - name: ff_qcd_stat
-  #   effect: shape
-  #   processes: [QCD]
-  #   weight_up:   "BDT_FF_score_QCD_sublead * FF_qcd_ipcut_up / FF_qcd_ipcut_nom"
-  #   weight_down: "BDT_FF_score_QCD_sublead * FF_qcd_ipcut_down / FF_qcd_ipcut_nom"
+systematics: []
 
 scans:
-  - {pois: [alpha], points: 80, range: [0.0, 1.5707963267948966]}
-  - {pois: [alpha, mu_ggH], points: 40,
-     ranges: [[0.0, 1.5707963267948966], [0.0, 3.0]]}
-  - {pois: [alpha, mu_qqH], points: 40,
-     ranges: [[0.0, 1.5707963267948966], [0.0, 3.0]]}
+  - {pois: [alpha], points: 80, range: [0.0, 1.0]}
 
 asimov:
   enabled: true
-  # SM Asimov truth. For a CP-mixed injection, set e.g. alpha: 0.4.
-  parameters: {mu_ggH: 1.0, mu_qqH: 1.0, alpha: 0.0}
+  # SM Asimov truth. Here alpha is a linear template interpolation:
+  # alpha=0 -> SM template, alpha=1 -> PS template.
+  parameters: {alpha: 0.0}
 
 toy: {asymmetry: 0.0}
 
-auto_mc_stats: 10
+auto_mc_stats: null
 
 # combine:
 #   image: /cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/cms-cloud/combine-standalone:latest

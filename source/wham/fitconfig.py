@@ -330,6 +330,17 @@ class CombineCfg(_Model):
     cmssw: str | None = None
 
 
+class ExportCfg(_Model):
+    """Optional staging of WHAM shapes for an external datacard workflow."""
+
+    target: str
+    stage_dir: str | None = None
+    output_file: str = "shapes.root"
+    write_native_datacard: bool = True
+    write_manifest: bool = True
+    process_map: dict[str, str] = {}
+
+
 class FitConfig(_Model):
     name: str
     analysis: str  # bare name or path of the analysis YAML
@@ -341,6 +352,7 @@ class FitConfig(_Model):
     toy: ToyCfg = ToyCfg()
     auto_mc_stats: int | None = 10
     combine: CombineCfg = CombineCfg()
+    export: ExportCfg | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> "FitConfig":

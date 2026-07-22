@@ -407,9 +407,10 @@ def render(config_path: str, only: tuple[str, ...], only_vars: tuple[str, ...]) 
 @click.option("--no-cache", is_flag=True, help="Rebuild skims and histograms from scratch.")
 @click.option("--force", is_flag=True, help="Rerun all combine stages even if fresh.")
 @click.option("--datacard-only", is_flag=True, help="Stop after exporting datacard + shapes.")
+@click.option("--shapes-only", is_flag=True, help="Stop after exporting shapes and optional external staging.")
 @click.option("--no-render", is_flag=True, help="Skip prefit/postfit/pulls/NLL plots.")
 def fit(config: str, workers: int, no_cache: bool,
-        force: bool, datacard_only: bool, no_render: bool) -> None:
+        force: bool, datacard_only: bool, shapes_only: bool, no_render: bool) -> None:
     """Datacard export + Combine fit, fully driven by a fit config.
 
     CONFIG is a fit YAML — a path, or a bare name resolved in
@@ -428,6 +429,10 @@ def fit(config: str, workers: int, no_cache: bool,
     )
     from wham.histcache import cache_key
     from wham.skim import ensure_skims
+
+    if datacard_only and shapes_only:
+        console.print("[red bold]Choose either --datacard-only or --shapes-only, not both.[/red bold]")
+        sys.exit(1)
 
     try:
         fit_path = resolve_fit_config(config)
@@ -478,13 +483,16 @@ def fit(config: str, workers: int, no_cache: bool,
 
     try:
         fitdir = run_fit(fit_cfg, base_cfg, hists_by_cat, input_keys, console=console,
-                         force=force, datacard_only=datacard_only)
+                         force=force, datacard_only=datacard_only, shapes_only=shapes_only)
     except Exception as e:
         console.print(f"[red bold]Fit failed:[/red bold] {e}")
         sys.exit(1)
 
     if datacard_only:
         console.print(f"[bold green]Datacard ready[/bold green] -> {fitdir}/")
+        return
+    if shapes_only:
+        console.print(f"[bold green]Shapes ready[/bold green] -> {fitdir}/")
         return
 
     if not no_render:
