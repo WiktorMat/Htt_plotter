@@ -11,7 +11,7 @@
 
 name: mutau_2024_CP
 lumi: 109080.0
-data_dir: /eos/home-w/wmatyszk/data_mutau/Run3_2024/mt
+data_dir: /eos/user/w/wmatyszk/ditau_analysis/Higgs_KinFit_full/Run3_2024/tt
 
 style:
   cms_label: "Private Work"
@@ -27,37 +27,25 @@ selection: >
   & idDeepTau2018v2p5VSe_2 >= 2
   & idDeepTau2018v2p5VSmu_2 >= 4
 
-trigger: "trg_singlemuon == 1 | trg_mt_cross == 1"
+trigger: "trg_singlemuon == 1"
 weight: weight
 
 processes:
-  QCD:      {kind: qcd, color: "tab:olive", label: "QCD multi-jet"}
-  dibosons: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown", label: "Multiboson"}
-  tt:       {samples: ["TTto*", "ST_tW_*"], color: "tab:purple", label: "$t\\bar{t}$"}
-  W+jets:   {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "lightcoral", label: "W+jets",
-             cut: "genPartFlav_2 != 0 & genPartFlav_2 != 6"}
-  W_jfake:  {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "tab:red",
-             label: "W (jet$\\rightarrow\\tau_{h}$)",
-             cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6"}
-  DY_2Mu:   {samples: ["DYto2Mu_*"], color: "tab:blue",
-             label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$, $\\mu\\rightarrow\\tau_{h}$"}
   DY_2Tau:  {samples: ["DYto2Tau_*"], color: "tab:orange",
-             label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$"}
+             label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$"} 
 
   # Signal process names used by Configurations/fits/phi_cp.yaml.
   # Adjust sample globs to the actual Higgs directories available in data_dir.
-  ggH:      {samples: ["GluGluHTo2Tau*", "ggH*"], color: "tab:green",
+  ggH:      {samples: ["GluGluHTo2Tau*"], color: "tab:green",
              label: "ggH, H\\rightarrow\\tau\\tau"}
-  qqH:      {samples: ["VBFHToTauTau*", "qqH*", "VBF*"], color: "tab:cyan",
-             label: "qqH, H\\rightarrow\\tau\\tau"}
 
-  data:     {kind: data, samples: ["Muon0_*", "Muon1_*"], color: "black"}
+  data:     {kind: data, samples: ["GluGluHTo2Tau*"], color: "black"}
 
 qcd:
   method: abcd
   os: "os == 1"
-  iso: "idDeepTau2018v2p5VSjet_2 >= 5"
-  antiiso: "idDeepTau2018v2p5VSjet_2 > 1 & idDeepTau2018v2p5VSjet_2 < 5"
+  iso: "idDeepTau2018v2p5VSjet_2 >= 7"
+  antiiso: "idDeepTau2018v2p5VSjet_2 > 1 & idDeepTau2018v2p5VSjet_2 < 7"
 
 variables:
   pt_1:    {bins: 24, range: [20, 80],  label: "$p_{T}^{\\mu}$ [GeV]"}

@@ -30,6 +30,10 @@ DYto2Tau_MLL_50_amcatnloFXFX:
   eff: 116466835
   filter_efficiency: 1.0
   xs: 2094.2000000000003
+GluGluHTo2Tau_UncorrelatedDecay_Filtered:
+  eff: 38650617
+  filter_efficiency: 0.3847
+  xs: 3.2759
 ST_tW_antitop_2L2Nu:
   eff: 7501499
   filter_efficiency: 1.0
