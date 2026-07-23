@@ -10,6 +10,8 @@
 # Every stage is cached: editing a systematic re-exports and refits in
 # seconds; rerunning with nothing changed only re-renders.
 # Flags: --datacard-only, --force, --no-render, --no-cache.
+# Finished fit shapes can be renamed/merged into external-fitter input files
+# with `wham export <export.yaml>` (see Configurations/tau_sf/*/taufw_export.yaml).
 
 name: my_fit                # output directory name
 analysis: mutau_2024        # analysis YAML (bare name in Configurations/, or a path)

@@ -536,5 +536,33 @@ def fitsummary(configs: tuple[str, ...], var: str, label: str | None) -> None:
     render_fit_summary(entries, outdir, var, label, console)
 
 
+@main.command()
+@click.argument("config")
+@click.option("--strict", is_flag=True,
+              help="Turn cross-fit consistency warnings into errors.")
+def export(config: str, strict: bool) -> None:
+    """Write external-fitter input ROOT files (e.g. TauFW Fitter inputs) from
+    the shapes.root of finished fits. CONFIG is an export YAML listing the
+    fits and, per output file, the bin/process/systematic renames, sums and
+    rebins (see Configurations/tau_sf/*/taufw_export.yaml). Reads fit
+    outputs only — run `wham fit` for each fit first."""
+    from wham.export import load_export_config, run_export
+
+    path = Path(config)
+    if not path.is_file():
+        console.print(f"[red bold]Export config error:[/red bold] no file '{config}'")
+        sys.exit(1)
+    try:
+        cfg = load_export_config(path)
+    except Exception as e:
+        console.print(f"[red bold]Export config error:[/red bold] {e}")
+        sys.exit(1)
+    try:
+        run_export(cfg, path.parent.resolve(), strict=strict, console=console)
+    except Exception as e:
+        console.print(f"[red bold]Export failed:[/red bold] {e}")
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     main()

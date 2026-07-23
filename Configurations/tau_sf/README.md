@@ -75,6 +75,9 @@ done
 
 # cross-DM summary for the scenario (SF vs pT per DM + TES per DM)
 wham fitsummary Configurations/tau_sf/$S/tau_sf_dm{0,1,2,10,11}.yaml --label "VSe VVLoose"
+
+# TauFW-Fitter input files (after all five dm fits of the scenario)
+wham export Configurations/tau_sf/$S/taufw_export.yaml
 ```
 Outputs land in `plots/mutau_tauSF_<scenario>_2024/` (control plots) and
 `plots/mutau_tauSF_<scenario>_2024/fit/tau_sf_<scenario>_<dm>/` per DM:
@@ -144,3 +147,21 @@ Outputs land in `plots/mutau_tauSF_<scenario>_2024/` (control plots) and
   `wham fitsummary Configurations/tau_sf/<scenario>/tau_sf_dm{0,1,2,10,11}.yaml --label "..."`
   overlays the ID SFs vs pT and the per-DM TES on one canvas (profile errors).
 - **TODO**: tune the ABCD anti-iso window.
+
+## Export to TauFW
+
+`wham export Configurations/tau_sf/<scenario>/taufw_export.yaml` merges the five
+dm fits' `shapes.root` into the two TauFW-Fitter harvester input files
+(`ztt_mt_tes_m_vis.inputs-2024-13TeV_mutau.root` + the `ztt_mm_…_mumu.root`
+Zmm control companion), written to a fresh
+`…/TauFW/Fitter/input_wham/againstjet_VVTight/againstelectron_<WP>/` tree —
+point the TauFW runner there with `-i input_wham`. Mapping (all in the YAML):
+`ZTT←DY_genuine` (+`ZTT_TES*` grid, f=1.000 skipped — plain ZTT is nominal),
+`ZL←DY_lfake`, `ZJ←DY_jfake`, `TTT/TTL/TTJ←tt/tt_lfake/tt_jfake`,
+`W←W_jets+W_jfake` (summed; its `shape_jTauFake` = W_jets nominal + shifted
+W_jfake), `VV←dibosons`, `ST←ST+ST_lfake+ST_jfake`, `ltf/jtf_dmX_ptY →
+shape_{m,j}TauFake_DMX_ptY`; pt5 bins rebinned 22→11 (TauFW parity). Extras
+the TauFW harvester simply ignores: the DM11 dirs and the 0.005-step TES
+points (its config lists the bins/masses it uses; the reference inputs are
+0.010-stepped). In the mm file `ZJ←DY_2E` may be absent (zero-yield drop) —
+keep the `FitSetup_mumu.yml` process list consistent.
