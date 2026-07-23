@@ -25,23 +25,20 @@ from wham.parallel import run_parallel
 from wham.util import file_signature, short_key
 
 ROW_GROUP_SIZE = 512 * 1024
+# rows per streamed read batch when building a skim. Bounds a worker's peak
+# memory to ~(batch rows x columns) instead of the whole (multi-GB) source
+# file — required on memory-capped nodes (lxplus cgroup OOM otherwise).
+SKIM_BATCH_ROWS = 256 * 1024
 
-
-def coalesced_parquet_format():
-    """Parquet format options that merge tiny scattered reads (proven ~2x on EOS)."""
-    import pyarrow as pa
-    import pyarrow.dataset as ds
-
-    return ds.ParquetFileFormat(
-        default_fragment_scan_options=ds.ParquetFragmentScanOptions(
-            pre_buffer=True,
-            cache_options=pa.CacheOptions(
-                hole_size_limit=64 * 1024,
-                range_size_limit=32 * 1024 * 1024,
-                lazy=False,
-            ),
-        )
-    )
+# Read coalescing (ds.ParquetFragmentScanOptions + CacheOptions) was tried here
+# to merge the sources' tiny row groups, and had to be dropped: the coalesced
+# range cache is never evicted mid-fragment, so scanning a single-fragment file
+# accumulated the whole file's ranges regardless of batch size. Measured on a
+# 3.5 GB source (12 columns): coalesced 2.44 GB peak / plain iter_batches with
+# pre_buffer=False 649 MB peak and 73 s vs 83 s — cheaper on memory AND faster,
+# because a sequential row-group walk is already covered by EOS/OS readahead
+# and the cache only added retained buffers. Peak now tracks the batch size,
+# not the file size, which is what makes 20 GB+ sources skimmable at all.
 
 
 @dataclass(frozen=True)
@@ -113,20 +110,21 @@ def find_skim(analysis_name: str, sample: Sample, required: frozenset[str],
 def build_skim(analysis_name: str, sample: Sample, required: frozenset[str],
                fake_factors=None, ff_sig: dict | None = None) -> SkimInfo:
     """Read requested columns from the source and rewrite locally (crash-safe)."""
-    import pyarrow.dataset as ds
     import pyarrow.parquet as pq
+
+    import pyarrow as pa
 
     src_sig = file_signature(sample.path)
     available = set(pq.read_schema(sample.path).names)
     columns = sorted(required & available)
 
-    dataset = ds.dataset(str(sample.path), format=coalesced_parquet_format())
-    table = dataset.to_table(columns=columns)
+    source = pq.ParquetFile(str(sample.path), pre_buffer=False)
 
+    augment = None
     if fake_factors is not None:
         from wham.muffin import augment_table
 
-        table = augment_table(fake_factors, table)
+        augment = lambda t: augment_table(fake_factors, t)  # noqa: E731
 
     directory = skim_dir(analysis_name, sample)
     directory.mkdir(parents=True, exist_ok=True)
@@ -136,14 +134,40 @@ def build_skim(analysis_name: str, sample: Sample, required: frozenset[str],
     key = short_key(key_payload)
     final = directory / f"{key}.parquet"
     tmp = directory / f"{key}.parquet.tmp.{os.getpid()}"
-    pq.write_table(table, tmp, row_group_size=ROW_GROUP_SIZE, compression="snappy")
+
+    # stream source -> skim in bounded batches (one worker never holds the whole
+    # multi-GB file); the writer accumulates row groups on disk, not in memory
+    writer = None
+    rows = 0
+    col_names = columns
+    try:
+        for batch in source.iter_batches(batch_size=SKIM_BATCH_ROWS, columns=columns):
+            table = pa.Table.from_batches([batch])
+            if augment is not None:
+                table = augment(table)
+            if writer is None:
+                col_names = table.column_names
+                writer = pq.ParquetWriter(tmp, table.schema, compression="snappy")
+            writer.write_table(table, row_group_size=ROW_GROUP_SIZE)
+            rows += table.num_rows
+        if writer is None:  # empty source: still emit a valid (empty) skim
+            table = source.read(columns=columns)
+            if augment is not None:
+                table = augment(table)
+            col_names = table.column_names
+            writer = pq.ParquetWriter(tmp, table.schema, compression="snappy")
+            writer.write_table(table)
+    finally:
+        if writer is not None:
+            writer.close()
+        source.close()
     os.replace(tmp, final)
 
     manifest = {
         "src": src_sig,
         "covers": sorted(required),
-        "columns": table.column_names,  # includes appended score columns
-        "rows": table.num_rows,
+        "columns": col_names,  # includes appended score columns
+        "rows": rows,
         "created": time.time(),
         "version": __version__,
     }

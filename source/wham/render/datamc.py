@@ -65,7 +65,15 @@ def render_datamc(
 
         ax.set_xlabel("")  # mplhep copies the hist axis name; the ratio panel owns it
         ax.set_ylabel("Events")
-        ax.set_ylim(bottom=0)
+        vcfg = cfg.variables.get(var)
+        if vcfg is not None and vcfg.logy:
+            # log axis: floor just under one event, top with decades of headroom
+            # so the legend clears a peak that outruns the tails by orders of mag.
+            ax.set_yscale("log")
+            ymax = float(max(mc.max(initial=0.0), data.max(initial=0.0)))
+            ax.set_ylim(0.5, ymax * 50 if ymax > 0 else 10.0)
+        else:
+            ax.set_ylim(bottom=0)
         # legend reads top-of-stack first: Data, then MC top to bottom, band last
         handles, names = ax.get_legend_handles_labels()
         by_label = dict(zip(names, handles))

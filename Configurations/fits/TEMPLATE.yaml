@@ -19,12 +19,20 @@ analysis: mutau_2024        # analysis YAML (bare name in Configurations/, or a 
 # `variable` is the observable (any entry of the analysis `variables:` —
 # including unrolled 2D ones, e.g. {unroll: [aco_mu_rho, m_vis_varbins]});
 # `cut` (optional) is ANDed onto the analysis selection for this bin only.
+# `analysis` (optional) makes a CONTROL category: the bin is filled from
+# ANOTHER analysis config (own ntuples/selection/processes/QCD; path relative
+# to this file) as a backgrounds-only channel — e.g. a single-bin Z->mumu bin
+# anchoring the DY normalization via a nuisance shared with the main bins
+# (see Configurations/tau_sf/README.md). Model scales/morphs cannot act
+# there, and its processes must not share names with model processes.
 # ---------------------------------------------------------------------------
 categories:
   - {name: mt_SR, variable: m_vis}
   # decay-mode split example (same or different variable per bin):
   # - {name: mu_rho, variable: aco_mu_rho, cut: "decayModePNet_2 == 1"}
   # - {name: mu_pi,  variable: aco_mu_rho, cut: "decayModePNet_2 == 0"}
+  # control bin from another analysis (its own single-bin variable):
+  # - {name: zmm, variable: m_vis, analysis: ../mumu/mumu_2024.yaml}
 
 # ---------------------------------------------------------------------------
 # The model: POIs + how each process's yield depends on them.
@@ -85,8 +93,12 @@ systematics:
 # ---------------------------------------------------------------------------
 # Likelihood scans (MultiDimFit). One POI -> 1D profiled scan; two POIs ->
 # 2D grid rendered as a -2dlnL heatmap with 68/95% CL contours. `points` is
-# per axis. Scan windows default to best fit +- 10 sigma (clipped to the POI
-# range); override with `range` (1D) or `ranges` (2D, one [lo, hi] per POI).
+# per axis; a 2D scan may give per-POI counts `points: [n1, n2]` (in `pois`
+# order) for an asymmetric grid, e.g. a dense second axis. Scan windows
+# default to the FULL POI range; narrow them with `range` (1D) or `ranges`
+# (2D, one [lo, hi] per POI) when the default is too coarse for the contour.
+# A POI without a 1D scan still gets its profile value/error from any 2D
+# scan containing it (profiled over the other axis) — pois plot + fitsummary.
 # If `scans:` is omitted entirely, every POI gets a default 1D scan.
 # ---------------------------------------------------------------------------
 scans:

@@ -1,0 +1,68 @@
+# wham analysis config -- mu-mu channel, Run3 2024
+# Run with:  wham plot Configurations/mumu/mumu_2024.yaml
+# Per-sample xs/eff are auto-loaded from params.yaml next to this file.
+
+name: mumu_2024
+lumi: 109080.0            # /pb, Run3_2024 golden JSON (lumi.yaml)
+data_dir: /eos/user/h/haawedik/output_test/Run3_2024/mm
+
+style:
+  cms_label: "Private Work"
+  era: "2024"
+  com: 13.6
+
+# The HiggsDNA mm ntuples are already preselected to pt > 25 and iso < 0.3 on
+# both legs; this tightens onto the single-muon trigger plateau (leg 1). Only
+# the tag muon (leg 1) is isolated here -- the probe muon (leg 2) isolation is
+# the ABCD second axis (qcd.iso/antiiso below), so it must NOT be cut here.
+# No os cut here on purpose -- qcd.os supplies it for the signal region.
+selection: >
+  pt_1 > 26 & pt_2 > 25
+  & abs(eta_1) < 2.4 & abs(eta_2) < 2.4
+  & ip_z_1 < 0.2 & ip_z_2 < 0.2
+  & iso_1 < 0.15
+
+# trg_singlemuon/_2 are per-leg match flags. Only leg 1 is required to fire,
+# which is what the pt_1 > 26 plateau cut above pairs with; use
+# "trg_singlemuon == 1 | trg_singlemuon_2 == 1" instead if you want either leg.
+trigger: "trg_singlemuon == 1"
+
+# w_DY_soup is ALREADY inside `weight` -- do not multiply it in again.
+weight: weight
+
+# Order = stack draw order (bottom to top); data is drawn as points.
+# QCD (multijet) is data-driven via the ABCD method (see qcd block below): a
+# per-bin OS/SS transfer factor is measured in the probe-muon anti-iso sideband
+# and applied to the same-sign isolated yield to predict OS_iso QCD.
+processes:
+  QCD:      {kind: qcd, color: "tab:gray", label: "QCD multi-jet"}
+  dibosons: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown", label: "Multiboson"}
+  tt:       {samples: ["TTto*", "ST_tW_*"], color: "tab:purple", label: "$t\\bar{t}$ + single $t$"}
+  W+jets:   {samples: ["WtoENu_*", "WtoMuNu_*", "WtoTauNu_*"], color: "tab:red"}
+  DY_2E:    {samples: ["DYto2E_*"], color: "tab:green",
+             label: "$Z\\rightarrow ee$"}
+  DY_2Tau:  {samples: ["DYto2Tau_*"], color: "tab:orange",
+             label: "$Z\\rightarrow\\tau\\tau$"}
+  DY_2Mu:   {samples: ["DYto2Mu_*"], color: "tab:blue",
+             label: "$Z\\rightarrow\\mu\\mu$"}
+  data:     {kind: data, samples: ["Muon0_*", "Muon1_*"], color: "black"}
+
+# QCD multijet by ABCD. Second axis = probe muon (leg 2) isolation; the OS/SS
+# transfer factor is measured per m_vis bin in the anti-iso sideband and applied
+# to SS_iso to predict OS_iso. Signal region becomes OS_iso. The anti-iso window
+# is capped at 0.3 by the ntuple preselection (iso < 0.3 on both legs).
+qcd:
+  method: abcd
+  os: "os == 1"
+  iso: "iso_2 < 0.15"       # probe muon isolated (signal isolation)
+  antiiso: "iso_2 > 0.15"   # probe muon anti-isolated sideband (< 0.3 by preselection)
+
+variables:
+  # ONE bin over the Z window: this is the zmm control-bin observable for the
+  # tau_sf fits (Configurations/tau_sf/*/tau_sf_dm*.yaml reference it via
+  # their `zmm` category) — a counting bin whose data/MC ratio anchors the
+  # correlated xsec_dy nuisance, i.e. the DY normalization of the mutau bins.
+  m_vis: {bins: 1, range: [70, 110], label: "$m_{\\mu\\mu}$ [GeV]", logy: false}
+
+plots:
+  datamc: [m_vis]

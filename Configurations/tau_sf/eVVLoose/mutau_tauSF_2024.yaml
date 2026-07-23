@@ -1,12 +1,12 @@
 # wham analysis config — tau_h ID & ES scale factors (PNet VSjet), mu-tau, Run3 2024.
-# CP-analysis phase space. Drives the `wham fit tau_sf` measurement; per-sample
+# CP-analysis phase space. Anti-lepton WP scenario: VSe VVLoose (>=2) + VSmu Tight (>=4).
 # xs/eff auto-loaded from params.yaml next to this file.
 #
 # Fakes: ABCD on the PNet raw score (self-consistent with the WP under
 # measurement). Genmatch per-process cuts isolate the genuine tau_h signal and
 # keep jet->tau_h fakes out of MC (they are the data-driven ABCD estimate).
 
-name: mutau_tauSF_2024
+name: mutau_tauSF_eVVLoose_2024
 lumi: 109080.0            # /pb
 data_dir: /eos/user/w/wmatyszk/data_mutau/Run3_2024/mt
 

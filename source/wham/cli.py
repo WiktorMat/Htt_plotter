@@ -431,7 +431,7 @@ def fit(config: str, workers: int, no_cache: bool,
 
     try:
         fit_path = resolve_fit_config(config)
-        fit_cfg, base_cfg = load_fit_config(fit_path)
+        fit_cfg, base_cfg, cat_cfgs = load_fit_config(fit_path)
     except Exception as e:
         console.print(f"[red bold]Fit config error:[/red bold] {e}")
         sys.exit(1)
@@ -445,39 +445,50 @@ def fit(config: str, workers: int, no_cache: bool,
            if fit_cfg.toy.asymmetry else "")
     )
 
-    try:
-        samples, warnings = discover_samples(base_cfg)
-    except Exception as e:
-        console.print(f"[red bold]Sample discovery error:[/red bold] {e}")
-        sys.exit(1)
-    for w in warnings:
-        console.print(f"[yellow]Warning:[/yellow] {w}")
+    # group categories by analysis (control categories draw from their own
+    # config): one sample-discovery + skim pass per analysis, then the
+    # per-category fills — each cached under its own analysis name
+    groups: dict[int, tuple] = {}
+    for cat in fit_cfg.categories:
+        acfg = cat_cfgs[cat.name]
+        groups.setdefault(id(acfg), (acfg, []))[1].append(cat)
 
     t0 = time.perf_counter()
-    # one skim pass covering every category's columns, then per-category fills
-    union_cfg = union_analysis(fit_cfg, base_cfg)
-    skims = ensure_skims(union_cfg, samples, workers=workers, force=no_cache,
-                         on_progress=_skim_progress(len(samples)))
-
     hists_by_cat: dict[str, dict] = {}
     input_keys: dict[tuple[str, str, str], str] = {}
-    for cat in fit_cfg.categories:
-        ccfg = category_analysis(fit_cfg, base_cfg, cat)
-        hists_by_cat[cat.name] = fill_all(
-            ccfg, samples, skims, families=families, only_vars=(cat.variable,),
-            workers=workers, use_cache=not no_cache, sidecars=False, console=console,
-        )
-        spec = build_fill_spec(ccfg, families=families, only_vars=(cat.variable,))
-        extras = spec_extras(spec)
-        for family, name, vcfg in hist_keys(spec):
-            input_keys[(cat.name, family, name)] = cache_key(
-                ccfg, samples, skims, spec, family, name, vcfg,
-                extra=extras.get((family, name)),
+    for acfg, cats in groups.values():
+        try:
+            samples, warnings = discover_samples(acfg)
+        except Exception as e:
+            console.print(
+                f"[red bold]Sample discovery error[/red bold] ({acfg.name}): {e}")
+            sys.exit(1)
+        for w in warnings:
+            console.print(f"[yellow]Warning:[/yellow] {w}")
+
+        # one skim pass covering this analysis's category columns
+        union_cfg = union_analysis(fit_cfg, acfg, cats)
+        skims = ensure_skims(union_cfg, samples, workers=workers, force=no_cache,
+                             on_progress=_skim_progress(len(samples)))
+
+        for cat in cats:
+            ccfg = category_analysis(fit_cfg, acfg, cat)
+            hists_by_cat[cat.name] = fill_all(
+                ccfg, samples, skims, families=families, only_vars=(cat.variable,),
+                workers=workers, use_cache=not no_cache, sidecars=False, console=console,
             )
+            spec = build_fill_spec(ccfg, families=families, only_vars=(cat.variable,))
+            extras = spec_extras(spec)
+            for family, name, vcfg in hist_keys(spec):
+                input_keys[(cat.name, family, name)] = cache_key(
+                    ccfg, samples, skims, spec, family, name, vcfg,
+                    extra=extras.get((family, name)),
+                )
     console.print(f"Histograms ready in {time.perf_counter() - t0:.1f}s")
 
     try:
-        fitdir = run_fit(fit_cfg, base_cfg, hists_by_cat, input_keys, console=console,
+        fitdir = run_fit(fit_cfg, base_cfg, hists_by_cat, input_keys,
+                         cat_cfgs=cat_cfgs, console=console,
                          force=force, datacard_only=datacard_only)
     except Exception as e:
         console.print(f"[red bold]Fit failed:[/red bold] {e}")
@@ -490,7 +501,7 @@ def fit(config: str, workers: int, no_cache: bool,
     if not no_render:
         from wham.render.fit import render_fit
 
-        render_fit(fit_cfg, base_cfg, fitdir, console)
+        render_fit(fit_cfg, base_cfg, fitdir, console, cat_cfgs=cat_cfgs)
 
     console.print(
         f"[bold green]Fit done[/bold green] in {time.perf_counter() - t0:.1f}s -> {fitdir}/"
@@ -514,7 +525,7 @@ def fitsummary(configs: tuple[str, ...], var: str, label: str | None) -> None:
     entries = []
     for c in configs:
         try:
-            fit_cfg, base_cfg = load_fit_config(resolve_fit_config(c))
+            fit_cfg, base_cfg, _ = load_fit_config(resolve_fit_config(c))
         except (ValueError, FileNotFoundError) as e:
             console.print(f"[red bold]Config error[/red bold] ({c}): {e}")
             sys.exit(1)

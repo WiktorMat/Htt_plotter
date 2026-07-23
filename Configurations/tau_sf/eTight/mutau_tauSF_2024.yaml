@@ -1,0 +1,102 @@
+# wham analysis config — tau_h ID & ES scale factors (PNet VSjet), mu-tau, Run3 2024.
+# CP-analysis phase space. Anti-lepton WP scenario: VSe Tight (>=6) + VSmu Tight (>=4).
+# xs/eff auto-loaded from params.yaml next to this file.
+#
+# Fakes: ABCD on the PNet raw score (self-consistent with the WP under
+# measurement). Genmatch per-process cuts isolate the genuine tau_h signal and
+# keep jet->tau_h fakes out of MC (they are the data-driven ABCD estimate).
+
+name: mutau_tauSF_eTight_2024
+lumi: 109080.0            # /pb
+data_dir: /eos/user/w/wmatyszk/data_mutau/Run3_2024/mt
+
+style:
+  cms_label: "Private Work"
+  era: "2024"
+  com: 13.6
+
+# Baseline (mu-tau, leg _2 = tau_h). The PNet VSjet WP is NOT here — it is the
+# qcd.iso signal-region cut below, so the ABCD sidebands stay populated. The
+# per-DM decay-mode splits + pT bins are applied per category in the fit config.
+#
+# m_vis is selected WIDE (20-200) but the fit observable is binned in the analysis
+# window [40,150] (see `variables` below). This is required for TES: at each morph
+# grid point f the engine re-evaluates the whole selection with m_vis*sqrt(f) and
+# pt_2*f (morph `scales`), so events must exist just OUTSIDE the window to migrate
+# across its edges when shifted. A tight `m_vis > 40` selection would starve the
+# low edge for tes>1, giving a spuriously tight + asymmetric TES likelihood.
+# The pt_2 bin edges (fit-config categories) migrate the same way — the engine
+# widens the parquet read window automatically. CAVEAT: the skims have a hard
+# pt_2 >= 20 floor, so the first pT bin cannot gain events from below 20 at f>1
+# (one-sided; TauFW avoids this by cutting on post-shift pt at pico level).
+#
+# Not propagated (nominal-only approximations vs TauFW): TES->MET, so the
+# mt_1 < 65 acceptance is frozen at nominal.
+selection: >
+  pt_1 > 26 & abs(eta_1) < 2.4
+  & iso_1 < 0.15 & mt_1 < 65 & m_vis > 20 & m_vis < 200
+  & idDeepTau2018v2p5VSe_2 >= 6 & idDeepTau2018v2p5VSmu_2 >= 4
+
+trigger: "trg_singlemuon == 1"
+weight: weight
+
+# Order = stack draw order (bottom to top); data drawn as points.
+# Genmatch (genPartFlav_2): 5 = genuine tau_h; 1-4 = e/mu->tau_h (lepton fakes,
+# LTF energy scale ±3%); 0/6 = jet->tau_h. DY and tt are genmatch-SPLIT (one
+# sample feeds several processes with disjoint cuts) so the fake-tau energy
+# scales can shift each component: jet->tau_h MC templates (DY_jfake, tt_jfake)
+# and W_jfake carry the JTF scale ±10%; the ABCD QCD is then the multijet
+# remainder (the subtraction includes the MC jet fakes). W is genmatch-split
+# too: shifting the WHOLE W by jtf let its genuine W->tau_nu taus (which peak
+# like signal) trade against TES — a bimodal tes-jtf valley in the dm1 fit.
+# Dibosons keep the exclusion cut (their small jet-fake part stays in QCD).
+# tid_SF + TES act on DY_genuine only. The DYto2Mu genPartFlav==5 sliver is
+# dropped (negligible).
+processes:
+  QCD:        {kind: qcd, color: "tab:olive", label: "QCD multi-jet"}
+  dibosons:   {samples: ["WW", "WZ", "ZZ"], color: "tab:brown", label: "Multiboson",
+               cut: "genPartFlav_2 != 0 & genPartFlav_2 != 6"}
+  W_jfake:    {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "tab:red",
+               label: "W (jet$\\rightarrow\\tau_{h}$)",
+               cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6"}
+  W+jets:     {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "tab:cyan",
+               label: "W (genuine/$\\ell$)",
+               cut: "genPartFlav_2 != 0 & genPartFlav_2 != 6"}
+  tt_jfake:   {samples: ["TTto*", "ST_tW_*"], color: "tab:gray",
+               label: "$t\\bar{t}$ (jet$\\rightarrow\\tau_{h}$)",
+               cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6"}
+  tt_lfake:   {samples: ["TTto*", "ST_tW_*"], color: "tab:pink",
+               label: "$t\\bar{t}$ ($\\ell\\rightarrow\\tau_{h}$)",
+               cut: "genPartFlav_2 >= 1 & genPartFlav_2 <= 4"}
+  tt:         {samples: ["TTto*", "ST_tW_*"], color: "tab:purple",
+               label: "$t\\bar{t}$ (genuine)", cut: "genPartFlav_2 == 5"}
+  DY_jfake:   {samples: ["DYto2Mu_*", "DYto2Tau_*"], color: "tab:green",
+               label: "$Z$ (jet$\\rightarrow\\tau_{h}$)",
+               cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6"}
+  DY_lfake:   {samples: ["DYto2Mu_*", "DYto2Tau_*"], color: "tab:blue",
+               label: "$\\ell\\rightarrow\\tau_{h}$",
+               cut: "genPartFlav_2 >= 1 & genPartFlav_2 <= 4"}
+  DY_genuine: {samples: ["DYto2Tau_*"], color: "tab:orange",
+               label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$ (genuine)",
+               cut: "genPartFlav_2 == 5"}
+  data:       {kind: data, samples: ["Muon0_*", "Muon1_*"], color: "black"}
+
+# ABCD on the PNet VSjet WP. iso = pass VTight (idPNetVSjet_2>=7); antiiso = a
+# fail-VTight sideband. The WP is the ABCD discriminant, so it is NOT in the
+# baseline. TODO: tune the antiiso window for sideband statistics / closure.
+qcd:
+  method: abcd
+  os: "os == 1"
+  iso: "idPNetVSjet_2 >= 7"
+  antiiso: "idPNetVSjet_2 >= 1 & idPNetVSjet_2 < 7"
+
+# The fit observable. ONE binning, shared by every category (TES morphing uses a
+# single combine CMS_th1x, so all categories must share it). The [40,150] window is
+# narrower than the m_vis selection [20,200] on purpose, so TES-shifted events
+# migrate correctly across both edges (see the selection comment above).
+variables:
+  m_vis: {bins: 22, range: [40, 150], label: "$m_{vis}$ [GeV]"}
+  pt_2:  {bins: 18, range: [20, 200], label: "$p_{T}^{\\tau_{h}}$ [GeV]"}
+
+plots:
+  datamc: [m_vis, pt_2]
