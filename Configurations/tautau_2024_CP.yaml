@@ -24,11 +24,14 @@ selection: >
   & idDeepTau2018v2p5VSe_2 >= 2
   & idDeepTau2018v2p5VSmu_1 >= 4
   & idDeepTau2018v2p5VSmu_2 >= 4
+  & chi2 < 10
 
 trigger: "trg_doubletau == 1 | trg_doubletau_deeptau == 1 | trg_doubletauandjet == 1 | trg_doubletauandjet_deeptau == 1"
 weight: weight
 
 processes:
+  JetFakes: {kind: qcd, color: "tab:olive", label: "Jet fakes"}
+
   DY_2Tau:  {samples: ["DYto2Tau_*"], color: "tab:orange",
              label: "$Z\\rightarrow\\tau_{h}\\tau_{h}$"}
 
@@ -37,7 +40,9 @@ processes:
   ggH:      {samples: ["GluGluHTo2Tau*"], color: "tab:green",
              label: "ggH, H\\rightarrow\\tau\\tau"}
 
-  data:     {kind: data, samples: ["FakeData"], color: "black"}
+  # Real data/control-data are required for the ABCD JetFakes estimate.
+  # Adjust this glob if the data directories/files use a different prefix.
+  data:     {kind: data, samples: ["Tau*"], color: "black"}
 
 qcd:
   method: abcd
