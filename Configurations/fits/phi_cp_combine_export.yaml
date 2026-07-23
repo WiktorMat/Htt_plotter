@@ -10,33 +10,15 @@ name: phi_cp_combine_export
 analysis: tautau_2024_CP
 
 categories:
-  - name: tt_higgs_pipi
-    variable: aco_pi_pi
-    cut: "BDT_pred_class == 1 & BDT_pred_score >= 0.85 & decayModePNet_1 == 0 & decayModePNet_2 == 0 & ip_LengthSig_1 >= 1.0 & ip_LengthSig_2 >= 1.0"
-  - name: tt_higgs_pirho
-    variable: aco_pi_rho
-    cut: "BDT_pred_class == 1 & BDT_pred_score >= 0.85 & decayModePNet_1 == 0 & decayModePNet_2 == 1 & ip_LengthSig_1 >= 1.0 & pion_E_split_2 > 0.15"
-  - name: tt_higgs_rhopi
-    variable: aco_rho_pi
-    cut: "BDT_pred_class == 1 & BDT_pred_score >= 0.85 & decayModePNet_1 == 1 & decayModePNet_2 == 0 & pion_E_split_1 > 0.15 & ip_LengthSig_2 >= 1.0"
-  - name: tt_higgs_rhorho
-    variable: aco_rho_rho
-    cut: "BDT_pred_class == 1 & BDT_pred_score >= 0.85 & decayModePNet_1 == 1 & decayModePNet_2 == 1 & pion_E_split_1 > 0.15 & pion_E_split_2 > 0.15"
   - name: tt_higgs_pia1
-    variable: aco_pi_a1
-    cut: "BDT_pred_class == 1 & BDT_pred_score >= 0.85 & decayModePNet_1 == 0 & decayModePNet_2 == 10 & ip_LengthSig_1 >= 1.0 & hasRefitSV_2"
+    variable: MVA_vs_aco_pi_a1
+    cut: "BDT_pred_class == 1 & decayModePNet_1 == 0 & decayModePNet_2 == 10 & ip_LengthSig_1 >= 1.0 & hasRefitSV_2"
   - name: tt_higgs_rhoa1
-    variable: aco_rho_a1
-    cut: "BDT_pred_class == 1 & BDT_pred_score >= 0.85 & decayModePNet_1 == 1 & decayModePNet_2 == 10 & pion_E_split_1 > 0.15 & hasRefitSV_2"
-  - name: tt_higgs_a1pi
-    variable: aco_a1_pi
-    cut: "BDT_pred_class == 1 & BDT_pred_score >= 0.85 & decayModePNet_1 == 10 & decayModePNet_2 == 0 & hasRefitSV_1 & ip_LengthSig_2 >= 1.0"
-  - name: tt_higgs_a1rho
-    variable: aco_a1_rho
-    cut: "BDT_pred_class == 1 & BDT_pred_score >= 0.85 & decayModePNet_1 == 10 & decayModePNet_2 == 1 & hasRefitSV_1 & pion_E_split_2 > 0.15"
+    variable: MVA_vs_aco_rho_a1
+    cut: "BDT_pred_class == 1 & decayModePNet_1 == 1 & decayModePNet_2 == 10 & pion_E_split_1 > 0.15 & hasRefitSV_2"
   - name: tt_higgs_a1a1
-    variable: aco_a1_a1
-    cut: "BDT_pred_class == 1 & BDT_pred_score >= 0.85 & decayModePNet_1 == 10 & decayModePNet_2 == 10 & hasRefitSV_1 & hasRefitSV_2"
+    variable: MVA_vs_aco_a1_a1
+    cut: "BDT_pred_class == 1 & decayModePNet_1 == 10 & decayModePNet_2 == 10 & hasRefitSV_1 & hasRefitSV_2"
 
 model:
   pois:

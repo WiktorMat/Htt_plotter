@@ -27,7 +27,7 @@ selection: >
   & chi2 < 10
 
 trigger: "trg_doubletau == 1 | trg_doubletau_deeptau == 1 | trg_doubletauandjet == 1 | trg_doubletauandjet_deeptau == 1"
-weight: weight
+weight: weight / w_DY_soup
 
 processes:
   JetFakes: {kind: qcd, color: "tab:olive", label: "Jet fakes"}
@@ -60,7 +60,7 @@ variables:
   met_pt:  {bins: 40, range: [0, 200],  label: "$p_{T}^{miss}$ [GeV]"}
   dR:      {bins: 50, range: [0, 5],    label: "$\\Delta R(\\mu, \\tau_{h})$"}
 
-  bdt_cp: {column: BDT_pred_score, bins: [0.33, 0.57, 0.68, 0.77, 0.85, 1.0],
+  bdt_cp: {column: BDT_pred_score, bins: [0.33, 0.7, 0.8, 0.9, 1.0],
            label: "BDT score"}
   aco_pi_pi:  {bins: 8,  range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\pi\\pi)$", kind: angle}
   aco_pi_rho: {bins: 8, range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\pi\\rho)$", kind: angle}
