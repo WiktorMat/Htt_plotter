@@ -7,7 +7,7 @@
 # datacards, workspace and alpha scan are produced by the external repo.
 
 name: phi_cp_combine_export
-analysis: mutau_2024_CP
+analysis: tautau_2024_CP
 
 categories:
   - name: tt_higgs_pipi

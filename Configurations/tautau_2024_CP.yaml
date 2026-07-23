@@ -58,18 +58,18 @@ variables:
   bdt_cp: {column: BDT_pred_score, bins: [0.33, 0.57, 0.68, 0.77, 0.85, 1.0],
            label: "BDT score"}
   aco_pi_pi:  {bins: 8,  range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\pi\\pi)$", kind: angle}
-  aco_pi_rho: {bins: 10, range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\pi\\rho)$", kind: angle}
-  aco_rho_pi: {bins: 10, range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\rho\\pi)$", kind: angle}
-  aco_rho_rho: {bins: 10, range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\rho\\rho)$", kind: angle}
-  aco_pi_a1: {column: aco_pi_a1_FASTMTT_MassConstraint, bins: 10,
+  aco_pi_rho: {bins: 8, range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\pi\\rho)$", kind: angle}
+  aco_rho_pi: {bins: 8, range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\rho\\pi)$", kind: angle}
+  aco_rho_rho: {bins: 8, range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\rho\\rho)$", kind: angle}
+  aco_pi_a1: {column: aco_pi_a1_FASTMTT_MassConstraint, bins: 8,
               range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\pi a_{1})$", kind: angle}
-  aco_rho_a1: {column: aco_rho_a1_FASTMTT_MassConstraint, bins: 10,
+  aco_rho_a1: {column: aco_rho_a1_FASTMTT_MassConstraint, bins: 8,
                range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\rho a_{1})$", kind: angle}
-  aco_a1_pi: {column: aco_a1_pi_FASTMTT_MassConstraint, bins: 10,
+  aco_a1_pi: {column: aco_a1_pi_FASTMTT_MassConstraint, bins: 8,
               range: [0, 6.283185307179586], label: "$\\phi_{CP}(a_{1}\\pi)$", kind: angle}
-  aco_a1_rho: {column: aco_a1_rho_FASTMTT_MassConstraint, bins: 10,
+  aco_a1_rho: {column: aco_a1_rho_FASTMTT_MassConstraint, bins: 8,
                range: [0, 6.283185307179586], label: "$\\phi_{CP}(a_{1}\\rho)$", kind: angle}
-  aco_a1_a1: {bins: 10, range: [0, 6.283185307179586], label: "$\\phi_{CP}(a_{1}a_{1})$", kind: angle}
+  aco_a1_a1: {bins: 8, range: [0, 6.283185307179586], label: "$\\phi_{CP}(a_{1}a_{1})$", kind: angle}
 
   MVA_vs_aco_pi_pi:  {unroll: [aco_pi_pi, bdt_cp],  label: "BDT score x $\\phi_{CP}(\\pi\\pi)$"}
   MVA_vs_aco_pi_rho: {unroll: [aco_pi_rho, bdt_cp], label: "BDT score x $\\phi_{CP}(\\pi\\rho)$"}
