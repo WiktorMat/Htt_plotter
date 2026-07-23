@@ -1202,3 +1202,19 @@ systematics:
     assert down.factors["m_vis"] == pytest.approx(math.sqrt(0.90))
     # slice labels line up with the datacard's {name}Up/Down template suffixes
     assert up.slice_labels() == ["jtf_up"] and down.slice_labels() == ["jtf_down"]
+
+
+def test_tau_sf_fit_configs_load() -> None:
+    """Repo guard: the 10 tau_sf fit configs stay loadable, with single top
+    split out of tt (ST/ST_lfake/ST_jfake + xsec_st, ST in the zmm stack)."""
+    repo = Path(__file__).resolve().parents[3]
+    paths = sorted(repo.glob("Configurations/tau_sf/*/tau_sf_dm*.yaml"))
+    if len(paths) != 10:
+        pytest.skip("tau_sf configs not present")
+    for path in paths:
+        fit, cfg, cat_cfgs = load_fit_config(path)
+        assert {"ST", "ST_lfake", "ST_jfake"} <= set(cfg.processes)
+        for parent in ("tt", "tt_lfake", "tt_jfake"):
+            assert cfg.processes[parent].samples == ["TTto*"]
+        assert any(s.name == "xsec_st" for s in fit.systematics)
+        assert "ST" in cat_cfgs["zmm"].processes

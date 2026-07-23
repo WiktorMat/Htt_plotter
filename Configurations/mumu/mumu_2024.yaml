@@ -37,7 +37,8 @@ weight: weight
 processes:
   QCD:      {kind: qcd, color: "tab:gray", label: "QCD multi-jet"}
   dibosons: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown", label: "Multiboson"}
-  tt:       {samples: ["TTto*", "ST_tW_*"], color: "tab:purple", label: "$t\\bar{t}$ + single $t$"}
+  ST:       {samples: ["ST_tW_*"], color: "mediumpurple", label: "Single $t$"}
+  tt:       {samples: ["TTto*"], color: "tab:purple", label: "$t\\bar{t}$"}
   W+jets:   {samples: ["WtoENu_*", "WtoMuNu_*", "WtoTauNu_*"], color: "tab:red"}
   DY_2E:    {samples: ["DYto2E_*"], color: "tab:green",
              label: "$Z\\rightarrow ee$"}

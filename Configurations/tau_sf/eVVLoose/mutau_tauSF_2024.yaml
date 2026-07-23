@@ -42,13 +42,16 @@ weight: weight
 
 # Order = stack draw order (bottom to top); data drawn as points.
 # Genmatch (genPartFlav_2): 5 = genuine tau_h; 1-4 = e/mu->tau_h (lepton fakes,
-# LTF energy scale ±3%); 0/6 = jet->tau_h. DY and tt are genmatch-SPLIT (one
-# sample feeds several processes with disjoint cuts) so the fake-tau energy
-# scales can shift each component: jet->tau_h MC templates (DY_jfake, tt_jfake)
-# and W_jfake carry the JTF scale ±10%; the ABCD QCD is then the multijet
-# remainder (the subtraction includes the MC jet fakes). W is genmatch-split
-# too: shifting the WHOLE W by jtf let its genuine W->tau_nu taus (which peak
-# like signal) trade against TES — a bimodal tes-jtf valley in the dm1 fit.
+# LTF energy scale ±3%); 0/6 = jet->tau_h. DY, tt and single top are each
+# genmatch-SPLIT (one sample feeds several processes with disjoint cuts) so the
+# fake-tau energy scales can shift each component: jet->tau_h MC templates
+# (DY_jfake, tt_jfake, ST_jfake) and W_jfake carry the JTF scale ±10%; the ABCD
+# QCD is then the multijet remainder (the subtraction includes the MC jet
+# fakes). W is genmatch-split too: shifting the WHOLE W by jtf let its genuine
+# W->tau_nu taus (which peak like signal) trade against TES — a bimodal tes-jtf
+# valley in the dm1 fit. Single top (ST_tW_*) is its own column set (not merged
+# into tt) so it carries TauFW's separate xsec_st and maps 1:1 to TauFW's ST
+# process in the `wham export` files.
 # Dibosons keep the exclusion cut (their small jet-fake part stays in QCD).
 # tid_SF + TES act on DY_genuine only. The DYto2Mu genPartFlav==5 sliver is
 # dropped (negligible).
@@ -62,13 +65,21 @@ processes:
   W+jets:     {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "tab:cyan",
                label: "W (genuine/$\\ell$)",
                cut: "genPartFlav_2 != 0 & genPartFlav_2 != 6"}
-  tt_jfake:   {samples: ["TTto*", "ST_tW_*"], color: "tab:gray",
+  ST_jfake:   {samples: ["ST_tW_*"], color: "lightgray",
+               label: "Single $t$ (jet$\\rightarrow\\tau_{h}$)",
+               cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6"}
+  ST_lfake:   {samples: ["ST_tW_*"], color: "palevioletred",
+               label: "Single $t$ ($\\ell\\rightarrow\\tau_{h}$)",
+               cut: "genPartFlav_2 >= 1 & genPartFlav_2 <= 4"}
+  ST:         {samples: ["ST_tW_*"], color: "mediumpurple",
+               label: "Single $t$ (genuine)", cut: "genPartFlav_2 == 5"}
+  tt_jfake:   {samples: ["TTto*"], color: "tab:gray",
                label: "$t\\bar{t}$ (jet$\\rightarrow\\tau_{h}$)",
                cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6"}
-  tt_lfake:   {samples: ["TTto*", "ST_tW_*"], color: "tab:pink",
+  tt_lfake:   {samples: ["TTto*"], color: "tab:pink",
                label: "$t\\bar{t}$ ($\\ell\\rightarrow\\tau_{h}$)",
                cut: "genPartFlav_2 >= 1 & genPartFlav_2 <= 4"}
-  tt:         {samples: ["TTto*", "ST_tW_*"], color: "tab:purple",
+  tt:         {samples: ["TTto*"], color: "tab:purple",
                label: "$t\\bar{t}$ (genuine)", cut: "genPartFlav_2 == 5"}
   DY_jfake:   {samples: ["DYto2Mu_*", "DYto2Tau_*"], color: "tab:green",
                label: "$Z$ (jet$\\rightarrow\\tau_{h}$)",

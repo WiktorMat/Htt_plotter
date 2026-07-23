@@ -18,7 +18,9 @@ stays in sync — the only per-scenario tokens are the VSe threshold and the con
 - `mutau_tauSF_2024.yaml` — analysis config (`name: mutau_tauSF_<scenario>_2024`):
   baseline selection, anti-lepton WPs, ABCD-on-PNet QCD (VSjet WP is the ABCD iso, so
   the sidebands stay populated), genmatch-split processes (genuine τ_h vs ℓ/jet-fakes;
-  multijet is data-driven), `m_vis` observable.
+  multijet is data-driven), `m_vis` observable. Single top (`ST_tW_*`) is its own
+  genmatch-split column set (`ST`/`ST_lfake`/`ST_jfake`, not merged into `tt`) so it
+  carries a separate `xsec_st` and maps 1:1 to TauFW's `ST` process in the export.
 - `tau_sf_dm{0,1,2,10,11}.yaml` — **one fit config per PNet decay mode**
   (`name: tau_sf_<scenario>_dmX`, one datacard each, fit independently). Each has 5 pT
   categories with a free per-bin `tid_SF_dmX_ptY` POI (the ID SF, scaling the genuine-τ
@@ -93,7 +95,9 @@ Outputs land in `plots/mutau_tauSF_<scenario>_2024/` (control plots) and
   counting bin (`m_vis`, one bin over [70,110]) filled from the **mumu analysis**
   (`Configurations/mumu/mumu_2024.yaml`: its own ntuples, selection, ABCD QCD),
   declared via the fit-config category field `analysis:` (a generic engine
-  feature: control categories from another analysis config). Its only nuisance
+  feature: control categories from another analysis config; the mumu stack has
+  its own `ST` column, nuisance-free like the other non-DY processes there).
+  Its only nuisance
   is `xsec_dy` (lnN 1.02) + autoMCStats — deliberately no lumi/eff_m/xsec_tt…,
   so the ~5.6·10⁷-event yield pins `xsec_dy` to the observed μμ data/MC ratio,
   and the correlated `xsec_dy` (which also scales `DY_genuine` + the DY fakes in
@@ -128,12 +132,14 @@ Outputs land in `plots/mutau_tauSF_<scenario>_2024/` (control plots) and
   zero-width postfit band.
 - **Fakes**: jet→τ_h via ABCD on the PNet WP; MC processes exclude jet-fakes
   (`genPartFlav_2 ∉ {0,6}`) so they are not double-counted.
-- **Systematics**: lnN (lumi, eff_m, muon fake rate, cross sections, W/QCD norms)
-  plus the fake-τ energy scales as column-shift shape systs — `ltf` ±3% on the
-  ℓ→τ_h components, `jtf` ±10% on the jet→τ_h components (DY/tt genmatch-split,
-  W_jfake). Like TauFW's `shape_{m,j}TauFake_DMX_ptY`, the fake nuisances are
-  DEcorrelated per pT bin (the bins pull in opposite directions; one correlated
-  shift trades the tension against TES). All carried into the CH datacard.
+- **Systematics**: lnN (lumi, eff_m, muon fake rate, cross sections incl. the
+  separate `xsec_st` 1.05 on `ST*`, W/QCD norms) plus the fake-τ energy scales
+  as column-shift shape systs — `ltf` ±3% on the ℓ→τ_h components (`DY_lfake`,
+  `tt_lfake`, `ST_lfake`), `jtf` ±10% on the jet→τ_h components (`DY_jfake`,
+  `tt_jfake`, `ST_jfake`, `W_jfake`). Like TauFW's `shape_{m,j}TauFake_DMX_ptY`,
+  the fake nuisances are DEcorrelated per pT bin (the bins pull in opposite
+  directions; one correlated shift trades the tension against TES). All carried
+  into the CH datacard.
 - **Cross-DM summary**: after fitting each DM,
   `wham fitsummary Configurations/tau_sf/<scenario>/tau_sf_dm{0,1,2,10,11}.yaml --label "..."`
   overlays the ID SFs vs pT and the per-DM TES on one canvas (profile errors).
