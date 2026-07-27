@@ -41,7 +41,7 @@ auto_mc_stats: null
 
 export:
   target: combine_htautaucp
-  stage_dir: external_examples/Combine_HtautauCP/cpdatacards/wham_phi_cp
+  stage_dir: external/Combine_HtautauCP/cpdatacards/wham_phi_cp
   output_file: added_histo_tt-mergeXbins.root
   write_native_datacard: false
   write_manifest: true
