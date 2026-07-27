@@ -31,7 +31,11 @@ processes: # TODO: split DY to genuine tau and fake tau components
   QCD:      {kind: qcd, color: "tab:olive", label: "QCD multi-jet"}  
   dibosons: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown", label: "Multiboson"}
   tt:       {samples: ["TTto*", "ST_tW_*"], color: "tab:purple", label: "$t\\bar{t}$"}
-  W+jets:   {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "tab:red"}
+  W+jets:   {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "lightcoral", label: "W+jets", 
+             cut: "genPartFlav_2 != 0 & genPartFlav_2 != 6"}
+  W_jfake:    {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "tab:red",
+               label: "W (jet$\\rightarrow\\tau_{h}$)",
+               cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6"}
   DY_2Mu:   {samples: ["DYto2Mu_*"], color: "tab:blue",
              label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$, $\\mu\\rightarrow\\tau_{h}$"}
   DY_2Tau:  {samples: ["DYto2Tau_*"], color: "tab:orange",

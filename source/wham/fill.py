@@ -708,6 +708,7 @@ def fill_all(
     workers: int = 6,
     use_cache: bool = True,
     cache_only: bool = False,
+    write_cache: bool = True,
     sidecars: bool = True,
     console=None,
 ) -> dict[HistKey, Any]:
@@ -765,10 +766,11 @@ def fill_all(
 
         for family, name, vcfg in missing:
             h = fresh[(family, name)]
-            save_hist(cfg.name, family, name, _key(family, name, vcfg), h)
+            if write_cache:
+                save_hist(cfg.name, family, name, _key(family, name, vcfg), h)
             hists[(family, name)] = h
 
-        if sidecars:
+        if sidecars and write_cache:
             write_sidecars(cfg, hists)
 
     return hists

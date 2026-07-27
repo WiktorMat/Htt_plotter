@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from wham.config import load_config
-from wham.qcd import estimate_qcd
+from wham.qcd import abcd_transfer_factors, estimate_qcd
 
 PROCESSES = ["QCD", "TT", "DY", "data"]
 REGIONS = ["OS_iso", "SS_iso", "OS_antiiso", "SS_antiiso"]
@@ -43,6 +43,8 @@ def test_abcd_transfer_factor(workspace: dict) -> None:
     _set(h, "TT", "OS_antiiso", [10.0, 10.0, 10.0])  # qcd_os_anti = 20
     _set(h, "data", "SS_antiiso", [10.0, 0.0, 10.0])  # bin2: denominator 0 -> tf 0
     _set(h, "TT", "SS_antiiso", [0.0, 0.0, 0.0])
+
+    assert np.allclose(abcd_transfer_factors(cfg, h), [2.0, 0.0, 2.0])
 
     estimate_qcd(cfg, {("datamc", "x"): h})
 

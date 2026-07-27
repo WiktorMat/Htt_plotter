@@ -552,6 +552,57 @@ def write_shapes(path: Path, templates: dict[str, dict[str, Any]]) -> None:
                 f[f"{bin_name}/{name}"] = clean
 
 
+def _rename_templates(
+    templates: dict[str, dict[str, Any]], process_map: dict[str, str]
+) -> dict[str, dict[str, Any]]:
+    """Return a shallow template map with datacard process names remapped."""
+    if not process_map:
+        return templates
+    mapped: dict[str, dict[str, Any]] = {}
+    for bin_name, by_name in templates.items():
+        mapped[bin_name] = {
+            process_map.get(name, name): h1 for name, h1 in by_name.items()
+        }
+    return mapped
+
+
+def stage_export_shapes(fitdir: Path, fit: FitConfig, templates: dict[str, dict[str, Any]],
+                        console=None) -> None:
+    """Stage shapes for an external workflow declared in fit.export."""
+    if fit.export is None or fit.export.stage_dir is None:
+        return
+    stage_dir = Path(fit.export.stage_dir)
+    if not stage_dir.is_absolute():
+        stage_dir = util.repo_root() / stage_dir
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    out = stage_dir / fit.export.output_file
+    staged_templates = _rename_templates(templates, fit.export.process_map)
+    write_shapes(out, staged_templates)
+    if fit.export.write_manifest:
+        manifest = {
+            "target": fit.export.target,
+            "source_fit_dir": str(fitdir),
+            "shapes": str(out),
+            "categories": list(staged_templates),
+            "templates": {cat: sorted(by_name) for cat, by_name in staged_templates.items()},
+            "process_map": fit.export.process_map,
+        }
+        (stage_dir / "wham_export_manifest.json").write_text(
+            json.dumps(manifest, indent=2), encoding="utf-8"
+        )
+    if console is not None:
+        console.print(f"  [green]staged[/green] external shapes -> {out}")
+
+
+def staged_export_path(fit: FitConfig) -> Path | None:
+    if fit.export is None or fit.export.stage_dir is None:
+        return None
+    stage_dir = Path(fit.export.stage_dir)
+    if not stage_dir.is_absolute():
+        stage_dir = util.repo_root() / stage_dir
+    return stage_dir / fit.export.output_file
+
+
 def write_datacard(
     path: Path,
     *,
@@ -905,6 +956,7 @@ def run_fit(
     console=None,
     force: bool = False,
     datacard_only: bool = False,
+    shapes_only: bool = False,
 ) -> Path:
     """Export datacard/shapes/model and run combine, skipping fresh stages.
 
@@ -936,20 +988,27 @@ def run_fit(
 
     ch = ch_backend(fit)
     cmssw = cmssw_base(fit) if ch else None  # resolve early: clear error if unset
+
     cat_cfgs = cat_cfgs or {}
     ctrl = [c.name for c in control_categories(fit)]
-    # a CH/morph fit with control bins runs split cards: harvest.py writes the
-    # morph card, WHAM the plain control card, combineCards.py merges them
+
+    # A CH/morph fit with control bins runs split cards: harvest.py writes the
+    # morph card, WHAM the plain control card, combineCards.py merges them.
     split_cards = ch and bool(ctrl)
     harvest_card = HARVEST_CARD_FILE if split_cards else DATACARD_FILE
+
+    native_datacard = not shapes_only and (fit.export is None or fit.export.write_native_datacard)
+    staged_path = staged_export_path(fit)
+
     stale = force or key != old_key
     stale_run = force or key != old_run_key
+
     if ch:
-        export_missing = (missing(CH_HARVEST_FILE)
-                          or (split_cards and missing(CONTROL_CARD_FILE)))
+        export_missing = (missing(CH_HARVEST_FILE) or (split_cards and missing(CONTROL_CARD_FILE)))
     else:
-        export_missing = missing(DATACARD_FILE) or missing(MODEL_FILE)
-    do_export = stale or missing(SHAPES_FILE) or export_missing
+        export_missing = (native_datacard and (missing(DATACARD_FILE) or missing(MODEL_FILE)))
+
+    do_export = (stale or missing(SHAPES_FILE) or (staged_path is not None and not staged_path.is_file()) or export_missing)
     # CH builds the datacard itself (needs cmsenv), so it is a run stage, not an
     # export; the container path writes its datacard at export time.
     if ch:
@@ -1008,6 +1067,7 @@ def run_fit(
             encoding="utf-8",
         )
         write_shapes(fitdir / SHAPES_FILE, templates)
+        stage_export_shapes(fitdir, fit, templates, console)
         if ch:
             (fitdir / CH_HARVEST_FILE).write_text(_harvest(), encoding="utf-8")
             if split_cards:
@@ -1026,7 +1086,7 @@ def run_fit(
                     + (f" + {CONTROL_CARD_FILE} ({', '.join(ctrl)})"
                        if split_cards else "")
                 )
-        else:
+        elif native_datacard:
             write_datacard(
                 fitdir / DATACARD_FILE,
                 fit=fit, templates=templates,
@@ -1036,6 +1096,8 @@ def run_fit(
             (fitdir / MODEL_FILE).write_text(model_source(fit), encoding="utf-8")
             if console is not None:
                 console.print(f"  [green]exported[/green] {fitdir / DATACARD_FILE}")
+        elif console is not None:
+            console.print("  [green]exported[/green] shapes only")
     elif console is not None:
         console.print("  datacard/shapes up to date")
 
@@ -1099,6 +1161,10 @@ def run_fit(
     merge_stage = ("combineCards merge", do_merge, merge_command(fit), [DATACARD_FILE])
     card_stages = ([harvest_stage, merge_stage] if split_cards
                    else [harvest_stage]) if ch else []
+
+    if shapes_only:
+        manifest_path.write_text(json.dumps({"export_key": key, "time": time.time()}))
+        return fitdir
 
     if datacard_only:
         if ch:  # the CH datacard only exists once the harvester has run (cmsenv)
