@@ -23,6 +23,7 @@ REGIONS_ABCD = ("OS_iso", "SS_iso", "OS_antiiso", "SS_antiiso")
 REGIONS_SS = ("OS", "SS")
 REGIONS_FF = ("OS_iso", "OS_antiiso")
 REGIONS_FFCHECK = ("OS_antiiso_raw", "OS_antiiso_ff")
+REGIONS_FFCLOSURE = ("pass", "fail", "nan_weight")
 REGIONS_CP = ("even", "odd")
 
 HistKey = tuple[str, str]  # (family, variable-or-pair-name)
@@ -43,6 +44,8 @@ def regions_for(family: str, qcd_method: str) -> tuple[str, ...]:
         return REGIONS_SS
     if family == "ffcheck":
         return REGIONS_FFCHECK
+    if family == "ffclosure":
+        return REGIONS_FFCLOSURE
     if family == "cp":
         return REGIONS_CP
     return (REGION_NOMINAL,)
@@ -71,6 +74,14 @@ class FillSpec:
     fitcp: tuple[tuple[str, str, tuple[tuple[str, str], ...], dict], ...] = ()
     # anti-iso fills with and without the FF weight (qcd.method=ff only)
     ffcheck: tuple[tuple[str, dict], ...] = ()
+    # MUFFIN closure fills in a determination region:
+    # (var, varcfg), process, dr_selection, pass, fail, muffin weight expression.
+    ffclosure: tuple[tuple[str, dict], ...] = ()
+    ffclosure_process: str | None = None
+    ffclosure_selection: str | None = None
+    ffclosure_pass: str | None = None
+    ffclosure_fail: str | None = None
+    ffclosure_weight: str | None = None
     # shape variations filling the variation axis of the datamc/fitcp hists:
     # (name, target, processes, weight_up, weight_down, factors). weight/qcd_ff
     # targets use weight_up/down (factors empty); a columns target carries
@@ -197,6 +208,11 @@ def build_fill_spec(
     ffcheck = tuple(
         (v, vdump(v)) for v in cfg.plots.ffcheck if "ffcheck" in families and want(v)
     )
+    closure = cfg.fake_factors.closure if cfg.fake_factors is not None else None
+    ffclosure = tuple(
+        (v, vdump(v)) for v in (closure.variables if closure is not None and closure.enabled else [])
+        if "ffclosure" in families and want(v)
+    )
 
     return FillSpec(
         selection=cfg.selection,
@@ -214,6 +230,12 @@ def build_fill_spec(
         cp=cp,
         fitcp=fitcp,
         ffcheck=ffcheck,
+        ffclosure=ffclosure,
+        ffclosure_process=closure.process if closure is not None and closure.enabled else None,
+        ffclosure_selection=closure.selection if closure is not None and closure.enabled else None,
+        ffclosure_pass=closure.pass_ if closure is not None and closure.enabled else None,
+        ffclosure_fail=closure.fail if closure is not None and closure.enabled else None,
+        ffclosure_weight=closure.weight_expr() if closure is not None and closure.enabled else None,
         variations=tuple(
             (v.name, v.target, tuple(v.processes), v.weight_up, v.weight_down,
              tuple(sorted(v.factors.items())))
@@ -244,6 +266,7 @@ def hist_keys(spec: FillSpec) -> list[tuple[str, str, dict]]:
             seen.add(v)
             out.append(("fitcp", v, vcfg))
     out += [("ffcheck", v, vcfg) for v, vcfg in spec.ffcheck]
+    out += [("ffclosure", v, vcfg) for v, vcfg in spec.ffclosure]
     return out
 
 
@@ -570,6 +593,46 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
                 fill("ffcheck", var, vcfg, "OS_antiiso_raw", values, mask, weights)
                 fill("ffcheck", var, vcfg, "OS_antiiso_ff", values, mask, ff_w)
 
+    # ---- MUFFIN closure in the configured determination region. This is
+    # independent from estimate_qcd: it fills data and ordinary MC components,
+    # then the renderer forms data - MC without clipping.
+    if (spec.ffclosure and spec.ffclosure_selection is not None
+            and spec.ffclosure_pass is not None and spec.ffclosure_fail is not None
+            and spec.ffclosure_weight is not None):
+        parsed_dr = parse(spec.ffclosure_selection)
+        parsed_pass = parse(spec.ffclosure_pass)
+        parsed_fail = parse(spec.ffclosure_fail)
+        parsed_ff_weight = parse(spec.ffclosure_weight)
+        needed_closure = (
+            parsed_dr.columns
+            | parsed_pass.columns
+            | parsed_fail.columns
+            | parsed_ff_weight.columns
+        )
+        if needed_closure <= cols.names:
+            dr = base_mask(nominal_ctx) & cols.eval(spec.ffclosure_selection).astype(bool)
+            pass_mask = dr & cols.eval(spec.ffclosure_pass).astype(bool)
+            fail_mask = dr & cols.eval(spec.ffclosure_fail).astype(bool)
+            overlap = pass_mask & fail_mask
+            if np.any(overlap):
+                raise RuntimeError(
+                    "fake_factors.closure pass/fail selections overlap "
+                    f"for {int(np.sum(overlap))} events in sample {sample.name}"
+                )
+            ff_values = cols.eval(spec.ffclosure_weight).astype(float)
+            finite_ff = np.isfinite(ff_values)
+            for var, vcfg in spec.ffclosure:
+                data = var_data(nominal_ctx, var, vcfg)
+                if data is None:
+                    continue
+                values, valid = data
+                fill("ffclosure", var, vcfg, "pass", values,
+                     pass_mask & valid, weights)
+                fill("ffclosure", var, vcfg, "fail", values,
+                     fail_mask & valid & finite_ff, weights * ff_values)
+                fill("ffclosure", var, vcfg, "nan_weight", values,
+                     fail_mask & valid & ~finite_ff, np.ones(n))
+
     # ---- cp: even/odd CP weights (MC only)
     if sample.kind != "data":
         for var, even_col, odd_col, vcfg in spec.cp:
@@ -789,4 +852,5 @@ def _restrict_spec(spec: FillSpec, keys: set[HistKey]) -> FillSpec:
         cp=tuple(x for x in spec.cp if ("cp", x[0]) in keys),
         fitcp=tuple(x for x in spec.fitcp if ("fitcp", x[0]) in keys),
         ffcheck=tuple(x for x in spec.ffcheck if ("ffcheck", x[0]) in keys),
+        ffclosure=tuple(x for x in spec.ffclosure if ("ffclosure", x[0]) in keys),
     )

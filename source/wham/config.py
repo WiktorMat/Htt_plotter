@@ -18,14 +18,14 @@ from pydantic import (
 
 from wham.expr import ExprError, parse
 
-FAMILIES = ("resolution", "datamc", "cp", "fitcp", "ffcheck", "display3d")
+FAMILIES = ("resolution", "datamc", "cp", "fitcp", "ffcheck", "ffclosure", "display3d")
 
 # Columns the 3D display needs if that family is configured.
 DISPLAY3D_COLUMNS = {"pt_1", "eta_1", "phi_1", "pt_2", "eta_2", "phi_2", "met_pt", "met_phi"}
 
 
 class _Model(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class VariableCfg(_Model):
@@ -201,6 +201,43 @@ class Display3DCfg(_Model):
     n_events: int = Field(default=1, gt=0)
 
 
+class FFClosureCfg(_Model):
+    """Optional MUFFIN pass/fail closure plots in a determination region.
+
+    The shape chi-square reported by this diagnostic treats the normalization
+    scale as fixed and uses only diagonal statistical variances. It is a compact
+    closure metric, not a formal goodness-of-fit test with full covariance.
+    """
+
+    enabled: bool = False
+    process: str = "QCD"
+    selection: str | None = None
+    pass_: str | None = Field(default=None, alias="pass")
+    fail: str | None = None
+    variables: list[str] = []
+    metrics: list[Literal["normalization", "shape_chi2", "max_significance"]] = [
+        "normalization",
+        "shape_chi2",
+        "max_significance",
+    ]
+    weight: str | None = None
+
+    @model_validator(mode="after")
+    def _enabled_needs_fields(self) -> "FFClosureCfg":
+        if self.enabled and not (self.selection and self.pass_ and self.fail and self.variables):
+            raise ValueError(
+                "fake_factors.closure enabled=true requires selection, pass, fail and variables"
+            )
+        return self
+
+    def weight_expr(self) -> str:
+        if self.weight is not None:
+            return self.weight
+        from wham.muffin import score_column
+
+        return score_column(self.process)
+
+
 class FakeFactorsCfg(_Model):
     """Apply BDT fake-factor models at skim time (see wham/muffin.py)."""
 
@@ -210,6 +247,7 @@ class FakeFactorsCfg(_Model):
     era: str | None = None            # a trained era, e.g. Run3_2022EE
     era_label: int | None = None      # raw label override (2024 borrowing 2023BPix etc.)
     systematics: bool = False         # also write the _up/_down score columns
+    closure: FFClosureCfg | None = None
 
     @model_validator(mode="after")
     def _era_resolvable(self) -> "FakeFactorsCfg":
@@ -231,6 +269,11 @@ class FakeFactorsCfg(_Model):
                 model_file(self.models, self.channel, process)
             except FileNotFoundError as e:
                 raise ValueError(f"fake_factors: {e}") from None
+        if self.closure is not None and self.closure.enabled:
+            if self.closure.process not in self.processes:
+                raise ValueError(
+                    "fake_factors.closure.process must be listed in fake_factors.processes"
+                )
         return self
 
     def resolved_era_label(self) -> int:
@@ -309,6 +352,19 @@ class AnalysisConfig(_Model):
                 parse(proc.cut)
             except ExprError as e:
                 raise ValueError(f"invalid 'cut' for process '{name}': {e}") from None
+        if self.fake_factors is not None and self.fake_factors.closure is not None:
+            cl = self.fake_factors.closure
+            if cl.enabled:
+                for label, src in [
+                    ("fake_factors.closure.selection", cl.selection),
+                    ("fake_factors.closure.pass", cl.pass_),
+                    ("fake_factors.closure.fail", cl.fail),
+                    ("fake_factors.closure.weight", cl.weight_expr()),
+                ]:
+                    try:
+                        parse(src)
+                    except ExprError as e:
+                        raise ValueError(f"invalid expression in '{label}': {e}") from None
         return self
 
     @model_validator(mode="after")
@@ -324,6 +380,11 @@ class AnalysisConfig(_Model):
             used[c.var] = "plots.fitcp"
         for v in self.plots.ffcheck:
             used[v] = "plots.ffcheck"
+        if self.fake_factors is not None and self.fake_factors.closure is not None:
+            cl = self.fake_factors.closure
+            if cl.enabled:
+                for v in cl.variables:
+                    used[v] = "fake_factors.closure.variables"
         missing = {v: fam for v, fam in used.items() if v not in self.variables}
         if missing:
             listed = ", ".join(f"'{v}' ({fam})" for v, fam in sorted(missing.items()))
@@ -420,6 +481,13 @@ class AnalysisConfig(_Model):
             cols |= self.columns_of_var(reco) | self.columns_of_var(ref)
         for v in (*self.plots.datamc, *self.plots.ffcheck):
             cols |= self.columns_of_var(v)
+        if self.fake_factors is not None and self.fake_factors.closure is not None:
+            cl = self.fake_factors.closure
+            if cl.enabled:
+                for src in (cl.selection, cl.pass_, cl.fail, cl.weight_expr()):
+                    cols |= parse(src).columns
+                for v in cl.variables:
+                    cols |= self.columns_of_var(v)
         for c in self.plots.cp:
             cols |= self.columns_of_var(c.var) | {c.even, c.odd}
         for f in self.plots.fitcp:

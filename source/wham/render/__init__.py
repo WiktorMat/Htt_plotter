@@ -32,6 +32,10 @@ def render_families(
         from wham.render.ffcheck import render_ffcheck
 
         render_ffcheck(cfg, hists, outdir, only_vars, console)
+    if "ffclosure" in families:
+        from wham.render.ffclosure import render_ffclosure
+
+        render_ffclosure(cfg, hists, outdir, only_vars, console)
     if "cp" in families:
         from wham.render.cp import render_cp
 
