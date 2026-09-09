@@ -5,6 +5,7 @@
 name: mutau_2024
 lumi: 109080.0            # /pb
 data_dir: /eos/home-w/wmatyszk/data_mutau/Run3_2024/mt
+output_dir: plots/PNet_abcd_validation
 
 style:
   cms_label: "Private Work"   # text after "CMS": Preliminary, Simulation, ...
@@ -12,42 +13,64 @@ style:
   com: 13.6                   # sqrt(s) in TeV
 
 selection: >
-  pt_1 > 26 & pt_2 > 25
-  & abs(eta_1) < 2.4 & abs(eta_2) < 2.5
-  & ip_z_1 < 0.2 & ip_z_2 < 0.2
-  & iso_1 < 0.15
+  pt_1 > 26
+  & abs(eta_1) < 2.4
+  & pt_2 > 20
+  & abs(eta_2) < 2.5
+  & iso_1 < 0.3
+  & iso_1 > 0.15
+  & dR > 0.5
   & idDeepTau2018v2p5VSe_2 >= 2
   & idDeepTau2018v2p5VSmu_2 >= 4
-#  & n_bjets == 0
+  & (
+    (decayModePNet_2 == 0 & ip_LengthSig_2 >= 1.25)
+      | (decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15)
+      | (decayMode_2 == 1 & decayModePNet_2 == 2 & pion_E_split_2 > 0.15)
+      | (decayModePNet_2 == 10 & hasRefitSV_2)
+    )
+#  & m_vis > 40
 # NB: no idDeepTau...VSjet_2 cut here on purpose — the signal region gets it
 # from qcd.iso below; putting it in the baseline empties the ABCD sidebands
 # and the QCD estimate comes out zero.
 
-trigger: "trg_singlemuon == 1 | trg_mt_cross == 1"
+# & (
+#    (decayModePNet_2 == 0 & ip_LengthSig_2 >= 1.25)
+#      | (decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15)
+#      | (decayMode_2 == 1 & decayModePNet_2 == 2 & pion_E_split_2 > 0.15)
+#      | (decayModePNet_2 == 10 & hasRefitSV_2)
+#    )
+
+trigger: "trg_singlemuon == 1"
 weight: weight
 
 # Order = stack draw order (bottom to top); data is drawn as points.
-processes: # TODO: split DY to genuine tau and fake tau components
-  QCD:      {kind: qcd, color: "tab:olive", label: "QCD multi-jet"}  
+processes:
+  QCD:      {kind: qcd, color: "tab:olive", label: "QCD multi-jet"}
   dibosons: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown", label: "Multiboson"}
   tt:       {samples: ["TTto*", "ST_tW_*"], color: "tab:purple", label: "$t\\bar{t}$"}
-  W+jets:   {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "tab:red"}
-  DY_2Mu:   {samples: ["DYto2Mu_*"], color: "tab:blue",
-             label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$, $\\mu\\rightarrow\\tau_{h}$"}
-  DY_2Tau:  {samples: ["DYto2Tau_*"], color: "tab:orange",
-             label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$"}
-  data:     {kind: data, samples: ["Muon0_*", "Muon1_*"], color: "black"}
+  W+jets:   {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "tab:red", label: "W+jets", 
+             cut: "genPartFlav_2 != 0 & genPartFlav_2 != 6"}
+  W_jfake:    {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "lightcoral",
+               label: "W (jet$\\rightarrow\\tau_{h}$)",
+               cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6"}
+  DY_2Mu: {samples: ["DYto2Mu_*"], color: "tab:blue",
+           label: "$Z\\rightarrow\\mu\\mu$, $\\mu\\rightarrow\\tau_{h}$"}
+
+  DY_2Tau: {samples: ["DYto2Tau_*"], color: "tab:orange",
+                      label: "$Z\\rightarrow\\tau\\tau$"}
+
+  data: {kind: data, samples: ["Muon0_*", "Muon1_*"], color: "black"}
 
 qcd:
-  method: abcd              # per-bin transfer factor from the anti-iso sidebands
+  method: abcd                  # switch back to 'abcd' to drop the BDT fake factors
   os: "os == 1"
-  iso: "idDeepTau2018v2p5VSjet_2 >= 5"
-  antiiso: "idDeepTau2018v2p5VSjet_2 > 1 & idDeepTau2018v2p5VSjet_2 < 5"
+  iso: "idPNetVSjet_2 >= 7"
+  antiiso: "idPNetVSjet_2 >= 1 & idPNetVSjet_2 < 7"
   ff_weight: "BDT_FF_score_QCD_sublead"
 
 # Bake BDT fake-factor scores into the skims (see README "BDT fake factors").
 fake_factors:
-  models: /eos/home-h/haawedik/shared-hagop-wiktor-data/muffin_trainings
+  models: /eos/home-w/wmatyszk/data_mutau/REAL/outputs/best_models/Run3_2024Thesis_withGlobal/
   channel: mt
   processes: [QCD]
   era_label: 0              # the muffin_trainings model was trained with label 0
@@ -57,36 +80,35 @@ variables:
   pt_2:    {bins: 24, range: [20, 80],  label: "$p_{T}^{\\tau_{h}}$ [GeV]"}
   m_vis:   {bins: 40, range: [0, 200],  label: "$m_{vis}$ [GeV]"}
   # same column, different binnings: 'column' points at the source branch
-  m_vis_coarse: {column: m_vis, bins: 10, range: [0, 200], label: "$m_{vis}$ [GeV]"}
+  # m_vis_coarse: {column: m_vis, bins: 10, range: [0, 200], label: "$m_{vis}$ [GeV]"}
   # explicit (variable-width) bin edges: give 'bins' a list, omit 'range'
-  m_vis_varbins: {column: m_vis, bins: [0, 40, 55, 65, 75, 85, 95, 110, 130, 160, 200],
-                  label: "$m_{vis}$ [GeV]"}
+  # m_vis_varbins: {column: m_vis, bins: [0, 40, 55, 65, 75, 85, 95, 110, 130, 160, 200],
+  #                 label: "$m_{vis}$ [GeV]"}
   mt_tot:  {bins: 40, range: [0, 200],  label: "$m_{T}^{tot}$ [GeV]"}
   mt_1:    {bins: 40, range: [0, 200],  label: "$m_{T}(\\mu)$ [GeV]"}
   mt_2:    {bins: 40, range: [0, 200],  label: "$m_{T}(\\tau_{h})$ [GeV]"}
   met_pt:  {bins: 40, range: [0, 200],  label: "$p_{T}^{miss}$ [GeV]"}
   met_phi: {bins: 63, range: [-3.14159, 3.14159], label: "$\\phi^{miss}$", kind: angle}
   dR:      {bins: 50, range: [0, 5],    label: "$\\Delta R(\\mu, \\tau_{h})$"}
+  n_bjets: {bins: 6, range: [-0.5, 5.5], label: "$N_{b-jets}$"}
+  Wjets_pred_score: {bins: 100, range: [0, 1], label: "$W_{jets} {score}$"}
   # the muffin-baked BDT fake-factor score (data spans ~0-0.42, median ~0.09)
-  bdt_ff_qcd: {column: BDT_FF_score_QCD_sublead, bins: 45, range: [0, 0.45],
-               label: "BDT FF score (QCD)"}
-  aco_mu_rho: {bins: 8, range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\mu\\rho)$", kind: angle}
+  # bdt_ff_qcd: {column: BDT_FF_score_QCD_sublead, bins: 45, range: [0, 0.45],
+  #                label: "BDT FF score (QCD)"}
+  # aco_mu_rho: {bins: 8, range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\mu\\rho)$", kind: angle}
+  FastMTT_mass: {bins: 44, range: [30, 250],  label: "$m_{FastMTT}$ [GeV]"}
   # 2D discriminant unrolled to 1D: phiCP in bins of m_vis (y-major blocks)
-  aco_unrolled: {unroll: [aco_mu_rho, m_vis_varbins],
-                 label: "$\\phi_{CP}(\\mu\\rho)$ unrolled in $m_{vis}$"}
+  # aco_unrolled: {unroll: [aco_mu_rho, m_vis_varbins],
+  #                label: "$\\phi_{CP}(\\mu\\rho)$ unrolled in $m_{vis}$"}
 
 plots:
-  resolution:
-    - [pt_1, pt_2]
-    - [mt_tot, m_vis]
-  datamc:     [pt_1, pt_2, m_vis, m_vis_coarse, m_vis_varbins,
-               mt_tot, mt_1, mt_2, met_pt, met_phi, dR, bdt_ff_qcd,
-               aco_unrolled]
-  cp:
-    - {var: aco_mu_rho, even: wt_cp_sm, odd: wt_cp_ps}
-  display3d:  {sample: "TTto2L2Nu", n_events: 3}
-
-
-  #per DM split plotting. i dont know how do so but needs to be applied to the plots section of the config file,
-  #or somewhere where it can be easy to implement. 
-  #add option for blinding. like Blind: true, and then in the plotting code, if blind is true, then for data, plot nothing and overwrite the label to "Internal, Simulation".
+#  resolution:
+#    - [pt_1, pt_2]
+#    - [mt_tot, m_vis]
+  datamc:     [pt_1, pt_2, m_vis,
+               mt_tot, mt_1, mt_2, met_pt, met_phi, dR, FastMTT_mass, n_bjets, Wjets_pred_score]
+  # anti-iso QCD (data - MC) before/after the FF weight + weighted/raw ratio
+#   ffcheck:    [bdt_ff_qcd, pt_2, m_vis, mt_tot, met_pt]
+#  cp:
+#    - {var: aco_mu_rho, even: wt_cp_sm, odd: wt_cp_ps}
+#  display3d:  {sample: "TTto2L2Nu", n_events: 3}

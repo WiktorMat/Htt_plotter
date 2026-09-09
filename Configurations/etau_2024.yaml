@@ -1,0 +1,90 @@
+# wham analysis config — electron-tau channel, Run3 2024
+# Run with:  wham plot Configurations/etau_2024.yaml
+# Per-sample xs/eff are auto-loaded from params.yaml next to this file.
+
+name: etau_2024
+lumi: 109080.0            # /pb
+data_dir: /eos/user/t/tsarkar/Run3_2024_et/Run3_2024/et
+output_dir: plots/etau_PNet_abcd_pt2_30
+
+style:
+  cms_label: "Private Work"   # text after "CMS": Preliminary, Simulation, ...
+  era: "2024"                 # shown next to the lumi
+  com: 13.6                   # sqrt(s) in TeV
+
+selection: >
+  pt_1 >= 32
+  & abs(eta_1) < 2.1
+  & pt_2 > 30
+  & abs(eta_2) < 2.5
+  & m_vis > 40
+  & iso_1 < 0.3
+  & iso_1 < 0.15
+  & mt_1 < 65
+  & dR > 0.5
+  & idDeepTau2018v2p5VSe_2 >= 6
+  & idDeepTau2018v2p5VSmu_2 >= 4
+  & (
+    (decayModePNet_2 == 0 & ip_LengthSig_2 >= 1.25)
+      | (decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15)
+      | (decayMode_2 == 1 & decayModePNet_2 == 2 & pion_E_split_2 > 0.15)
+      | (decayModePNet_2 == 10 & hasRefitSV_2)
+      | (decayModePNet_2 == 11 & hasRefitSV_2)
+    )
+# NB: no idPNetVSjet_2 cut here on purpose — the signal region gets it
+# from qcd.iso below; putting it in the baseline empties the ABCD sidebands.
+
+trigger: "trg_singleelectron == 1"
+weight: weight
+
+# Order = stack draw order (bottom to top); data is drawn as points.
+processes:
+  QCD:      {kind: qcd, color: "tab:olive", label: "QCD multi-jet"}
+  dibosons: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown", label: "Multiboson"}
+  tt:       {samples: ["TTto*", "ST_tW_*"], color: "tab:purple", label: "$t\\bar{t}$"}
+  W+jets:   {samples: ["WtoENu_*", "WtoTauNu_*"], color: "tab:red", label: "W+jets",
+             cut: "genPartFlav_2 != 0 & genPartFlav_2 != 6"}
+  W_jfake:  {samples: ["WtoENu_*", "WtoTauNu_*"], color: "lightcoral",
+             label: "W (jet$\\rightarrow\\tau_{h}$)",
+             cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6"}
+  DY_2E:    {samples: ["DYto2E_*"], color: "tab:blue",
+             label: "$Z\\rightarrow ee$, $e\\rightarrow\\tau_{h}$"}
+  DY_2Tau:  {samples: ["DYto2Tau_*"], color: "tab:orange",
+             label: "$Z\\rightarrow\\tau\\tau$"}
+  data:     {kind: data, samples: ["EGamma0_*", "EGamma1_*"], color: "black"}
+
+qcd:
+  method: abcd
+  os: "os == 1"
+  iso: "idPNetVSjet_2 >= 7"
+  antiiso: "idPNetVSjet_2 >= 1 & idPNetVSjet_2 < 7"
+  ff_weight: "BDT_FF_score_QCD_sublead"
+
+# Bake BDT fake-factor scores into the skims (see README "BDT fake factors").
+fake_factors:
+  models: /eos/home-w/wmatyszk/data_mutau/REAL/outputs/best_models/Run3_2024Thesis_withGlobal
+  channel: et
+  processes: [QCD]
+  era_label: 0
+
+variables:
+  pt_1:    {bins: 24, range: [20, 80], label: "$p_{T}^{e}$ [GeV]"}
+  pt_2:    {bins: 24, range: [20, 80], label: "$p_{T}^{\\tau_{h}}$ [GeV]"}
+  m_vis:   {bins: 40, range: [0, 200], label: "$m_{vis}$ [GeV]"}
+  mt_tot:  {bins: 40, range: [0, 200], label: "$m_{T}^{tot}$ [GeV]"}
+  mt_1:    {bins: 40, range: [0, 200], label: "$m_{T}(e)$ [GeV]"}
+  mt_2:    {bins: 40, range: [0, 200], label: "$m_{T}(\\tau_{h})$ [GeV]"}
+  met_pt:  {bins: 40, range: [0, 200], label: "$p_{T}^{miss}$ [GeV]"}
+  met_phi: {bins: 63, range: [-3.14159, 3.14159], label: "$\\phi^{miss}$", kind: angle}
+  dR:      {bins: 50, range: [0, 5], label: "$\\Delta R(e, \\tau_{h})$"}
+  n_bjets: {bins: 6, range: [-0.5, 5.5], label: "$N_{b-jets}$"}
+  Wjets_pred_score: {bins: 100, range: [0, 1], label: "$W_{jets} {score}$"}
+  bdt_ff_qcd: {column: BDT_FF_score_QCD_sublead, bins: 45, range: [0, 0.45],
+               label: "BDT FF score (QCD)"}
+  FastMTT_mass: {bins: 44, range: [30, 250], label: "$m_{FastMTT}$ [GeV]"}
+
+plots:
+  datamc: [pt_1, pt_2, m_vis,
+           mt_tot, mt_1, mt_2, met_pt, met_phi, dR, FastMTT_mass,
+           n_bjets, Wjets_pred_score, bdt_ff_qcd]
+  # ffcheck: [pt_2, m_vis, bdt_ff_qcd]
