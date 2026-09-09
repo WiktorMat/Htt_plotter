@@ -59,6 +59,44 @@ def _set_qcd(h: Any, region: str, qcd_proc: str, counts: np.ndarray, sumw2: np.n
     view[idx_p, idx_r, idx_v, :]["variance"] = sumw2
 
 
+def abcd_transfer_factors(
+    cfg: AnalysisConfig,
+    h: Any,
+    *,
+    variation: str = "nominal",
+) -> np.ndarray:
+    """ABCD OS/SS anti-isolated transfer factors along one histogram axis.
+
+    This is the same per-bin factor used by :func:`estimate_qcd` for
+    ``qcd.method=abcd``:
+
+        clip(data - mc, 0)_OS_antiiso / clip(data - mc, 0)_SS_antiiso
+    """
+    if cfg.qcd.method != "abcd":
+        raise ValueError("ABCD transfer factors require qcd.method=abcd")
+    data_proc = cfg.data_process()
+    if data_proc is None:
+        raise ValueError("ABCD transfer factors require a kind=data process")
+    qcd_proc = cfg.qcd_process()
+
+    regions = set(h.axes["region"])
+    if not {"OS_antiiso", "SS_antiiso"} <= regions:
+        raise ValueError("histogram does not contain ABCD anti-isolated regions")
+
+    def qcd_counts(region: str) -> np.ndarray:
+        data, _data_w2, mc, _mc_w2 = region_sums(
+            h,
+            region,
+            processes=list(cfg.processes.keys()),
+            data_proc=data_proc,
+            qcd_proc=qcd_proc,
+            variation=variation,
+        )
+        return np.maximum(data - mc, 0.0)
+
+    return _safe_ratio(qcd_counts("OS_antiiso"), qcd_counts("SS_antiiso"))
+
+
 def estimate_qcd(cfg: AnalysisConfig, datamc_hists: dict[Any, Any]) -> None:
     """Fill the QCD process slot of every datamc histogram, in place.
 
@@ -90,7 +128,7 @@ def estimate_qcd(cfg: AnalysisConfig, datamc_hists: dict[Any, Any]) -> None:
                     continue
                 for region in ("SS_iso", "OS_antiiso", "SS_antiiso"):
                     sums[region] = region_qcd(region)
-                tf = _safe_ratio(sums["OS_antiiso"][0], sums["SS_antiiso"][0])
+                tf = abcd_transfer_factors(cfg, h, variation=variation)
                 counts = np.maximum(sums["SS_iso"][0] * tf, 0.0)
                 sumw2 = sums["SS_iso"][1] * tf**2
                 _set_qcd(h, "OS_iso", qcd_proc, counts, sumw2, variation)

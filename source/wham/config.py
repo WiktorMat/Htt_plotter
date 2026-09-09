@@ -33,6 +33,7 @@ class VariableCfg(_Model):
     range: tuple[float, float] | None = None
     column: str | None = None  # source column; defaults to the variable name
     label: str | None = None
+    logy: bool = False  # render the datamc y-axis on a log scale
     kind: Literal["scalar", "angle"] = "scalar"
     relative: bool = True  # resolution: (reco-ref)/ref vs reco-ref
     # 2D discriminant unrolled to 1D: [x, y] variable names; the derived

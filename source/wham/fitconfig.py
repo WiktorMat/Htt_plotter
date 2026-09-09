@@ -218,6 +218,12 @@ class CategoryCfg(_Model):
     name: str       # datacard bin name
     variable: str   # observable, a variable of the analysis config
     cut: str | None = None  # extra selection on top of the analysis selection
+    # Control category: events/selection/processes come from ANOTHER analysis
+    # config (path resolved like FitConfig.analysis, relative to the fit YAML).
+    # None = the fit's main analysis. Control bins are plain backgrounds-only
+    # channels (no model scales/morphs) — e.g. a Z->mumu bin anchoring the DY
+    # normalization through a nuisance shared with the main bins.
+    analysis: str | None = None
 
     @model_validator(mode="after")
     def _name_safe(self) -> "CategoryCfg":
@@ -231,14 +237,24 @@ class CategoryCfg(_Model):
 
 class ScanCfg(_Model):
     pois: list[str] = Field(min_length=1, max_length=2)  # 1 -> 1D, 2 -> 2D grid
-    points: int = Field(default=50, gt=1)  # per axis
-    # explicit windows; without them the scan auto-windows around the best
-    # fit (+- 10 sigma from FitDiagnostics, clipped to the POI range)
+    # per axis; a 2D scan may give per-POI counts [n_first, n_second] (in `pois`
+    # order) for an asymmetric grid, e.g. a dense tes axis: [15, 51]
+    points: int | tuple[int, int] = 50
+    # explicit windows; without them the scan covers the full POI range
     range: tuple[float, float] | None = None  # 1D only
     ranges: list[tuple[float, float]] | None = None  # 2D only, one per POI
 
     @model_validator(mode="after")
     def _ranges_match_dim(self) -> "ScanCfg":
+        if isinstance(self.points, int):
+            if self.points <= 1:
+                raise ValueError(f"scan needs at least 2 points, got {self.points}")
+        else:
+            if len(self.pois) != 2:
+                raise ValueError("per-POI scan points [n1, n2] apply to 2D scans only")
+            if any(n <= 1 for n in self.points):
+                raise ValueError(
+                    f"scan needs at least 2 points per axis, got {list(self.points)}")
         if self.range is not None and len(self.pois) != 1:
             raise ValueError("scan 'range' applies to 1D scans only (2D: 'ranges')")
         if self.ranges is not None:
@@ -330,6 +346,17 @@ class CombineCfg(_Model):
     cmssw: str | None = None
 
 
+class ExportCfg(_Model):
+    """Optional staging of WHAM shapes for an external datacard workflow."""
+
+    target: str
+    stage_dir: str | None = None
+    output_file: str = "shapes.root"
+    write_native_datacard: bool = True
+    write_manifest: bool = True
+    process_map: dict[str, str] = {}
+
+
 class FitConfig(_Model):
     name: str
     analysis: str  # bare name or path of the analysis YAML
@@ -341,6 +368,7 @@ class FitConfig(_Model):
     toy: ToyCfg = ToyCfg()
     auto_mc_stats: int | None = 10
     combine: CombineCfg = CombineCfg()
+    export: ExportCfg | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> "FitConfig":
@@ -350,7 +378,12 @@ class FitConfig(_Model):
         templates = [t for proc in self.model.processes for t in template_names(self, proc)]
         if len(set(templates)) != len(templates):
             raise ValueError(f"model template names collide after sanitization: {templates}")
-        # per-category scale maps may only reference declared categories
+        # the model lives in the main analysis; control bins are backgrounds-only
+        control = {c.name for c in self.categories if c.analysis is not None}
+        if len(control) == len(names):
+            raise ValueError("every category is a control category — the model "
+                             "needs at least one main-analysis category")
+        # per-category scale maps may only reference declared main categories
         cat_set = set(names)
         for proc, pm in self.model.processes.items():
             raw = [pm.scale] if pm.components is None else [
@@ -363,12 +396,24 @@ class FitConfig(_Model):
                             f"model process '{proc}': scale maps unknown categories "
                             f"{sorted(unknown)} (categories: {sorted(cat_set)})"
                         )
+                    bad = set(s) & control
+                    if bad:
+                        raise ValueError(
+                            f"model process '{proc}': scale maps control categories "
+                            f"{sorted(bad)} — model scales act in main-analysis bins only"
+                        )
         for mname, morph in self.model.morphs.items():
             unknown = set(morph.categories) - cat_set
             if unknown:
                 raise ValueError(
                     f"morph '{mname}' restricted to unknown categories "
                     f"{sorted(unknown)} (categories: {sorted(cat_set)})"
+                )
+            bad = set(morph.categories) & control
+            if bad:
+                raise ValueError(
+                    f"morph '{mname}' acts in control categories {sorted(bad)} — "
+                    "morphs live in the main analysis"
                 )
         pois = set(self.model.pois) | set(self.model.morphs)
         for scan in self.scans or []:
@@ -452,6 +497,45 @@ def template_parents(fit: FitConfig, cfg: AnalysisConfig) -> dict[str, str]:
     for proc in fit.model.processes:
         for name in template_names(fit, proc):
             parents[name] = proc
+    return parents
+
+
+def main_categories(fit: FitConfig) -> list[CategoryCfg]:
+    """Categories of the fit's main analysis (the model acts here)."""
+    return [c for c in fit.categories if c.analysis is None]
+
+
+def control_categories(fit: FitConfig) -> list[CategoryCfg]:
+    """Backgrounds-only categories drawing from another analysis config."""
+    return [c for c in fit.categories if c.analysis is not None]
+
+
+def union_datacard_processes(
+    fit: FitConfig, cfg: AnalysisConfig, cat_cfgs: dict[str, AnalysisConfig],
+) -> tuple[list[str], list[str]]:
+    """datacard_processes with the control analyses' backgrounds appended
+    (dc-name dedup: a name shared with a main process is one datacard column
+    name — and thus one nuisance target — across bins)."""
+    signals, backgrounds = datacard_processes(fit, cfg)
+    seen = set(signals) | set(backgrounds)
+    for cat in control_categories(fit):
+        for proc in cat_cfgs[cat.name].stack_order():
+            n = dc_name(proc)
+            if n not in seen:
+                seen.add(n)
+                backgrounds.append(n)
+    return signals, backgrounds
+
+
+def union_template_parents(
+    fit: FitConfig, cfg: AnalysisConfig, cat_cfgs: dict[str, AnalysisConfig],
+) -> dict[str, str]:
+    """template_parents across the main and every control analysis (main
+    mapping wins on shared names)."""
+    parents = template_parents(fit, cfg)
+    for cat in control_categories(fit):
+        for proc in cat_cfgs[cat.name].stack_order():
+            parents.setdefault(dc_name(proc), proc)
     return parents
 
 
@@ -608,9 +692,12 @@ def _component_fills(fit: FitConfig, variable: str) -> list[ComponentFillCfg]:
 
 def category_analysis(fit: FitConfig, cfg: AnalysisConfig, cat: CategoryCfg) -> AnalysisConfig:
     """Analysis config for one category: cut folded into the selection,
-    plots reduced to exactly the fills this category's templates need."""
+    plots reduced to exactly the fills this category's templates need.
+    `cfg` is the category's OWN analysis (a control category passes its
+    control analysis; component fills only apply to processes it has)."""
     selection = cfg.selection if cat.cut is None else f"({cfg.selection}) & ({cat.cut})"
-    plots = PlotsCfg(datamc=[cat.variable], fitcp=_component_fills(fit, cat.variable))
+    fitcp = [f for f in _component_fills(fit, cat.variable) if f.process in cfg.processes]
+    plots = PlotsCfg(datamc=[cat.variable], fitcp=fitcp)
     return cfg.model_copy(update={
         "selection": selection, "plots": plots,
         "variations": (shape_variations(fit, cfg, cat.name)
@@ -618,17 +705,29 @@ def category_analysis(fit: FitConfig, cfg: AnalysisConfig, cat: CategoryCfg) -> 
     })
 
 
-def union_analysis(fit: FitConfig, cfg: AnalysisConfig) -> AnalysisConfig:
+def union_analysis(fit: FitConfig, cfg: AnalysisConfig,
+                   categories: list[CategoryCfg] | None = None) -> AnalysisConfig:
     """One config whose required_columns() covers every category fill —
-    drives the skim build once. Its selection is never evaluated."""
-    cuts = [c.cut for c in fit.categories if c.cut]
+    drives the skim build once. Its selection is never evaluated.
+    `categories` restricts to the categories filled from `cfg` (the fill
+    driver groups categories by analysis); default: all of them."""
+    cats = fit.categories if categories is None else categories
+    cuts = [c.cut for c in cats if c.cut]
     selection = " & ".join(f"({s})" for s in [cfg.selection, *cuts])
-    variables = list(dict.fromkeys(c.variable for c in fit.categories))
-    fitcp = [f for v in variables for f in _component_fills(fit, v)]
+    variables = list(dict.fromkeys(c.variable for c in cats))
+    fitcp = [f for v in variables for f in _component_fills(fit, v)
+             if f.process in cfg.processes]
     plots = PlotsCfg(datamc=variables, fitcp=fitcp)
+    # per-category union (deduped): an unscoped shape systematic resolves
+    # against every analysis, but a categories:-scoped one must only resolve
+    # against the analyses of the bins it acts in
+    variations: dict[str, VariationCfg] = {}
+    for c in cats:
+        for v in shape_variations(fit, cfg, c.name):
+            variations.setdefault(v.name, v)
     return cfg.model_copy(update={
         "selection": selection, "plots": plots,
-        "variations": shape_variations(fit, cfg),
+        "variations": list(variations.values()),
     })
 
 
@@ -673,7 +772,12 @@ def _resolve_analysis(ref: str, fit_yaml_dir: Path) -> Path:
     raise FileNotFoundError(f"analysis config '{ref}' not found")
 
 
-def load_fit_config(path: str | Path) -> tuple[FitConfig, AnalysisConfig]:
+def load_fit_config(
+    path: str | Path,
+) -> tuple[FitConfig, AnalysisConfig, dict[str, AnalysisConfig]]:
+    """Load a fit YAML. Returns (fit, main analysis, category name -> its
+    analysis) — main categories map to the shared main config object, control
+    categories to their own analysis (each distinct path loaded once)."""
     path = Path(path)
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
@@ -681,14 +785,25 @@ def load_fit_config(path: str | Path) -> tuple[FitConfig, AnalysisConfig]:
         raise ValueError(f"{path}: top level must be a mapping")
     fit = FitConfig.model_validate(raw)
 
-    cfg = load_config(_resolve_analysis(fit.analysis, path.parent))
+    loaded: dict[Path, AnalysisConfig] = {}
 
-    # ---- cross-validation against the analysis config
+    def _load(ref: str) -> AnalysisConfig:
+        p = _resolve_analysis(ref, path.parent).resolve()
+        if p not in loaded:
+            loaded[p] = load_config(p)
+        return loaded[p]
+
+    cfg = _load(fit.analysis)
+    cat_cfgs = {c.name: (_load(c.analysis) if c.analysis is not None else cfg)
+                for c in fit.categories}
+
+    # ---- cross-validation against the analysis configs
     for cat in fit.categories:
-        if cat.variable not in cfg.variables:
+        ccfg = cat_cfgs[cat.name]
+        if cat.variable not in ccfg.variables:
             raise ValueError(
                 f"category '{cat.name}': variable '{cat.variable}' is not defined "
-                f"in '{fit.analysis}' ({sorted(cfg.variables)})"
+                f"in '{cat.analysis or fit.analysis}' ({sorted(ccfg.variables)})"
             )
         if cat.cut is not None:
             try:
@@ -735,8 +850,11 @@ def load_fit_config(path: str | Path) -> tuple[FitConfig, AnalysisConfig]:
 
     if fit.model.morphs:
         # the morph pdf lives on combine's CMS_th1x, which is one observable
-        # padded to the largest channel's bin count, so every category must
-        # share the same observable binning for the morph to align
+        # padded to the largest channel's bin count, so every MAIN category
+        # must share the same observable binning for the morph to align.
+        # Control categories are exempt: they are merged in as plain-TH1
+        # channels at the datacard level (combineCards.py), outside the
+        # CombineHarvester morph workspace.
         def _nbins(var: str) -> int:
             v = cfg.variables[var]
             if v.unroll is not None:
@@ -744,18 +862,32 @@ def load_fit_config(path: str | Path) -> tuple[FitConfig, AnalysisConfig]:
                 return (len(cfg.variables[x].edges()) - 1) * (len(cfg.variables[y].edges()) - 1)
             return len(v.edges()) - 1
 
-        nbins = {c.name: _nbins(c.variable) for c in fit.categories}
+        nbins = {c.name: _nbins(c.variable) for c in main_categories(fit)}
         if len(set(nbins.values())) != 1:
             raise ValueError(
-                "TES morphing requires all categories to share one observable "
+                "TES morphing requires all main categories to share one observable "
                 f"binning (combine uses a single CMS_th1x); got {nbins}"
             )
 
-    if cfg.data_process() is None:
-        raise ValueError(f"analysis '{fit.analysis}' has no kind=data process")
+    for acfg in loaded.values():
+        if acfg.data_process() is None:
+            raise ValueError(f"analysis '{acfg.name}' has no kind=data process")
 
-    signals, backgrounds = datacard_processes(fit, cfg)
-    parents = template_parents(fit, cfg)
+    # a control process sharing a datacard name with a model template would make
+    # combineCards.py see one name as both signal and background — forbidden
+    model_names = {t for proc in fit.model.processes for t in template_names(fit, proc)}
+    model_names |= {dc_name(p) for p in fit.model.processes}
+    for cat in control_categories(fit):
+        clash = sorted({dc_name(p) for p in cat_cfgs[cat.name].stack_order()} & model_names)
+        if clash:
+            raise ValueError(
+                f"control category '{cat.name}': processes {clash} of "
+                f"'{cat.analysis}' collide with model process/template names — "
+                "control bins are backgrounds-only; rename the process"
+            )
+
+    signals, backgrounds = union_datacard_processes(fit, cfg, cat_cfgs)
+    parents = union_template_parents(fit, cfg, cat_cfgs)
     all_dc = signals + backgrounds
     for syst in fit.systematics:
         if not any(syst_matches(syst.processes, n, parents.get(n)) for n in all_dc):
@@ -772,6 +904,9 @@ def load_fit_config(path: str | Path) -> tuple[FitConfig, AnalysisConfig]:
                     raise ValueError(
                         f"systematic '{syst.name}': invalid {label}: {e}"
                     ) from None
-    shape_variations(fit, cfg)  # raises on unresolvable shape systematics
+    # raises on unresolvable shape systematics — per category against its own
+    # analysis, so a scoped systematic only needs to resolve where it acts
+    for cat in fit.categories:
+        shape_variations(fit, cat_cfgs[cat.name], cat.name)
 
-    return fit, cfg
+    return fit, cfg, cat_cfgs

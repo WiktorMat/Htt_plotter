@@ -1,0 +1,44 @@
+# xs / n_eff per sample for the mumu channel, Run3 2024.
+#
+# xs   = cross_sections.yaml value * its process k-factor, already multiplied
+#        out (same convention as Configurations/params.yaml for mutau).
+# eff  = effective_events.yaml (Run3_2024); already accounts for the 2024 half
+#        of the shared 2024/2025 samples, so no extra factor of 2.
+#
+# DY soup: all four samples of a flavour (incl + 0J + 1J + 2J) carry the
+# INCLUSIVE xs and INCLUSIVE n_eff -- that is what makes the stitching weight
+# (already baked into the `weight` column as w_DY_soup) close.
+
+# ---- DY (stitched NLO soup) -- inclusive xs = 6748/3 * 6282.6/6748 = 2094.2
+DYto2E_MLL_50_amcatnloFXFX:     {xs: 2094.2000000000003, eff: 162197196, filter_efficiency: 1.0}
+DYto2E_MLL_50_0J_amcatnloFXFX:  {xs: 2094.2000000000003, eff: 162197196, filter_efficiency: 1.0}
+DYto2E_MLL_50_1J_amcatnloFXFX:  {xs: 2094.2000000000003, eff: 162197196, filter_efficiency: 1.0}
+DYto2E_MLL_50_2J_amcatnloFXFX:  {xs: 2094.2000000000003, eff: 162197196, filter_efficiency: 1.0}
+DYto2Mu_MLL_50_amcatnloFXFX:    {xs: 2094.2000000000003, eff: 164095711, filter_efficiency: 1.0}
+DYto2Mu_MLL_50_0J_amcatnloFXFX: {xs: 2094.2000000000003, eff: 164095711, filter_efficiency: 1.0}
+DYto2Mu_MLL_50_1J_amcatnloFXFX: {xs: 2094.2000000000003, eff: 164095711, filter_efficiency: 1.0}
+DYto2Mu_MLL_50_2J_amcatnloFXFX: {xs: 2094.2000000000003, eff: 164095711, filter_efficiency: 1.0}
+DYto2Tau_MLL_50_amcatnloFXFX:    {xs: 2094.2000000000003, eff: 116466835, filter_efficiency: 1.0}
+DYto2Tau_MLL_50_0J_amcatnloFXFX: {xs: 2094.2000000000003, eff: 116466835, filter_efficiency: 1.0}
+DYto2Tau_MLL_50_1J_amcatnloFXFX: {xs: 2094.2000000000003, eff: 116466835, filter_efficiency: 1.0}
+DYto2Tau_MLL_50_2J_amcatnloFXFX: {xs: 2094.2000000000003, eff: 116466835, filter_efficiency: 1.0}
+
+# ---- W+jets (unstitched) -- xs = 55300/3 * 63425.1/55300 = 21141.7
+WtoENu_madgraphMLM:   {xs: 21141.699999999997, eff: 250407615, filter_efficiency: 1.0}
+WtoMuNu_madgraphMLM:  {xs: 21141.699999999997, eff: 212623581, filter_efficiency: 1.0}
+WtoTauNu_madgraphMLM: {xs: 21141.699999999997, eff: 241019596, filter_efficiency: 1.0}
+
+# ---- ttbar -- xs = NLO*BR * 923.6/762.1
+TTto2L2Nu: {xs: 98.04387875606875,  eff: 233169567, filter_efficiency: 1.0}
+TTtoLNu2Q: {xs: 405.74895682981236, eff: 240281605, filter_efficiency: 1.0}
+
+# ---- single top (no k-factor)
+ST_tW_top_2L2Nu:     {xs: 3.8,  eff: 7500406,  filter_efficiency: 1.0}
+ST_tW_antitop_2L2Nu: {xs: 3.8,  eff: 7501499,  filter_efficiency: 1.0}
+ST_tW_top_LNu2Q:     {xs: 15.8, eff: 14382095, filter_efficiency: 1.0}
+ST_tW_antitop_LNu2Q: {xs: 15.9, eff: 14702865, filter_efficiency: 1.0}
+
+# ---- dibosons -- xs = LO * k-factor (WW/ZZ 1.524, WZ 1.414)
+WW: {xs: 122.27052, eff: 32002627, filter_efficiency: 1.0}
+WZ: {xs: 41.1474,   eff: 15275182, filter_efficiency: 1.0}
+ZZ: {xs: 19.431,    eff: 2399642,  filter_efficiency: 1.0}

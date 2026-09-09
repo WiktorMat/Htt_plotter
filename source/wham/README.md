@@ -14,6 +14,8 @@ wham plot                   # full pipeline (config optional if only one YAML ex
 wham plot mutau_2024        # bare names resolve to Configurations/<name>.yaml
 wham render                 # style tweaks, seconds
 wham skim --prune           # manage skim cache
+wham fit <fit.yaml>         # datacard export + Combine fit (see Configurations/fits/TEMPLATE.yaml)
+wham export <export.yaml>   # rename/merge finished fit shapes into external-fitter inputs (TauFW)
 ```
 
 Useful flags: `--only datamc --var m_vis` (subset), `--workers 8`, `--no-cache` (full rebuild).

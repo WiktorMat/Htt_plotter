@@ -1,0 +1,102 @@
+# tau_h ID + ES SF -- PNet decay mode dm11 (1 datacard, independent fit).
+# tid_SF per pT bin; one tes_dm11 correlated across pT. 2D (tid_SF, tes) contours.
+# A zmm control bin (mumu analysis) anchors the DY normalization via xsec_dy.
+# Run:  wham fit Configurations/tau_sf/eVVLoose/tau_sf_dm11.yaml --workers 8
+name: tau_sf_eVVLoose_dm11
+analysis: mutau_tauSF_2024.yaml
+
+categories:
+  - {name: dm11_pt1, variable: m_vis, cut: "decayModePNet_2 == 11 & hasRefitSV_2 & pt_2 >= 20 & pt_2 < 30"}
+  - {name: dm11_pt2, variable: m_vis, cut: "decayModePNet_2 == 11 & hasRefitSV_2 & pt_2 >= 30 & pt_2 < 40"}
+  - {name: dm11_pt3, variable: m_vis, cut: "decayModePNet_2 == 11 & hasRefitSV_2 & pt_2 >= 40 & pt_2 < 50"}
+  - {name: dm11_pt4, variable: m_vis, cut: "decayModePNet_2 == 11 & hasRefitSV_2 & pt_2 >= 50 & pt_2 < 60"}
+  - {name: dm11_pt5, variable: m_vis, cut: "decayModePNet_2 == 11 & hasRefitSV_2 & pt_2 >= 60 & pt_2 < 200"}
+  # Z->mumu control bin from the mumu analysis: one m_vis bin [70,110] whose
+  # ~5.6e7-event yield pins xsec_dy to the observed mumu data/MC ratio,
+  # anchoring the DY normalization (incl. DY_genuine) in the mutau bins.
+  - {name: zmm, variable: m_vis, analysis: ../../mumu/mumu_2024.yaml}
+
+model:
+  pois:
+    tid_SF_dm11_pt1: {init: 1, range: [0, 3]}
+    tid_SF_dm11_pt2: {init: 1, range: [0, 3]}
+    tid_SF_dm11_pt3: {init: 1, range: [0, 3]}
+    tid_SF_dm11_pt4: {init: 1, range: [0, 3]}
+    tid_SF_dm11_pt5: {init: 1, range: [0, 3]}
+  processes:
+    DY_genuine:
+      scale:
+        dm11_pt1: tid_SF_dm11_pt1
+        dm11_pt2: tid_SF_dm11_pt2
+        dm11_pt3: tid_SF_dm11_pt3
+        dm11_pt4: tid_SF_dm11_pt4
+        dm11_pt5: tid_SF_dm11_pt5
+  morphs:
+    tes_dm11:
+      process: DY_genuine
+      grid: {from: 0.95, to: 1.05, step: 0.005}
+      categories: [dm11_pt1, dm11_pt2, dm11_pt3, dm11_pt4, dm11_pt5]
+      scales: {m_vis: sqrt, pt_2: linear}
+      init: 1.0
+      range: [0.95, 1.05]
+
+systematics:
+  - {name: lumi_13p6TeV, effect: lnN, processes: [DY_genuine, DY_lfake, DY_jfake, "tt*", "ST*", "W*", dibosons], scaleFactor: 1.025,
+     categories: [dm11_pt1, dm11_pt2, dm11_pt3, dm11_pt4, dm11_pt5]}
+  - {name: eff_m,        effect: lnN, processes: [DY_genuine, DY_lfake, DY_jfake, "tt*", "ST*", "W*", dibosons], scaleFactor: 1.02,
+     categories: [dm11_pt1, dm11_pt2, dm11_pt3, dm11_pt4, dm11_pt5]}
+  - {name: muonFakerate, effect: lnN, processes: [DY_lfake, tt_lfake, ST_lfake], scaleFactor: 1.50,
+     categories: [dm11_pt1, dm11_pt2, dm11_pt3, dm11_pt4, dm11_pt5]}
+  # correlated across ALL bins (no categories:): DY_genuine + fakes in the
+  # dm bins, DY_2Mu/DY_2Tau/DY_2E in zmm — the huge zmm yield pins the
+  # shared nuisance, transferring the mumu data/MC normalization to ZTT
+  - {name: xsec_dy,      effect: lnN, scaleFactor: 1.02,
+     processes: [DY_genuine, DY_lfake, DY_jfake, DY_2Mu, DY_2Tau, DY_2E]}
+  - {name: xsec_tt,      effect: lnN, processes: ["tt*"],      scaleFactor: 1.06,
+     categories: [dm11_pt1, dm11_pt2, dm11_pt3, dm11_pt4, dm11_pt5]}
+  - {name: xsec_st,      effect: lnN, processes: ["ST*"],      scaleFactor: 1.05,
+     categories: [dm11_pt1, dm11_pt2, dm11_pt3, dm11_pt4, dm11_pt5]}
+  - {name: xsec_vv,      effect: lnN, processes: [dibosons],   scaleFactor: 1.05,
+     categories: [dm11_pt1, dm11_pt2, dm11_pt3, dm11_pt4, dm11_pt5]}
+  - {name: norm_wj,      effect: lnN, processes: ["W*"],       scaleFactor: 1.08,
+     categories: [dm11_pt1, dm11_pt2, dm11_pt3, dm11_pt4, dm11_pt5]}
+  - {name: norm_qcd,     effect: lnN, processes: [QCD],        scaleFactor: 1.20,
+     categories: [dm11_pt1, dm11_pt2, dm11_pt3, dm11_pt4, dm11_pt5]}
+  - {name: rate_jTauFake_dm11_pt1, effect: lnN, processes: [QCD, W_jfake, DY_jfake, tt_jfake, ST_jfake], categories: [dm11_pt1], scaleFactor: 1.15}
+  - {name: rate_jTauFake_dm11_pt2, effect: lnN, processes: [QCD, W_jfake, DY_jfake, tt_jfake, ST_jfake], categories: [dm11_pt2], scaleFactor: 1.15}
+  - {name: rate_jTauFake_dm11_pt3, effect: lnN, processes: [QCD, W_jfake, DY_jfake, tt_jfake, ST_jfake], categories: [dm11_pt3], scaleFactor: 1.15}
+  - {name: rate_jTauFake_dm11_pt4, effect: lnN, processes: [QCD, W_jfake, DY_jfake, tt_jfake, ST_jfake], categories: [dm11_pt4], scaleFactor: 1.15}
+  - {name: rate_jTauFake_dm11_pt5, effect: lnN, processes: [QCD, W_jfake, DY_jfake, tt_jfake, ST_jfake], categories: [dm11_pt5], scaleFactor: 1.15}
+  # fake-tau energy scales (TauFW corrTES convention): refill the fake
+  # components with pt_2*(1+-s) and m_vis*sqrt(1+-s), selection re-applied on
+  # the shifted values (migration included). DEcorrelated per pT bin like
+  # TauFW's shape_{m,j}TauFake_DMX_ptY: the bins pull in opposite directions,
+  # and one correlated shift trades the tension against TES (bimodal valley)
+  - {name: ltf_dm11_pt1, effect: shape, processes: [DY_lfake, tt_lfake, ST_lfake], categories: [dm11_pt1], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.03}
+  - {name: ltf_dm11_pt2, effect: shape, processes: [DY_lfake, tt_lfake, ST_lfake], categories: [dm11_pt2], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.03}
+  - {name: ltf_dm11_pt3, effect: shape, processes: [DY_lfake, tt_lfake, ST_lfake], categories: [dm11_pt3], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.03}
+  - {name: ltf_dm11_pt4, effect: shape, processes: [DY_lfake, tt_lfake, ST_lfake], categories: [dm11_pt4], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.03}
+  - {name: ltf_dm11_pt5, effect: shape, processes: [DY_lfake, tt_lfake, ST_lfake], categories: [dm11_pt5], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.03}
+  - {name: jtf_dm11_pt1, effect: shape, processes: [DY_jfake, tt_jfake, ST_jfake, W_jfake], categories: [dm11_pt1], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.10}
+  - {name: jtf_dm11_pt2, effect: shape, processes: [DY_jfake, tt_jfake, ST_jfake, W_jfake], categories: [dm11_pt2], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.10}
+  - {name: jtf_dm11_pt3, effect: shape, processes: [DY_jfake, tt_jfake, ST_jfake, W_jfake], categories: [dm11_pt3], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.10}
+  - {name: jtf_dm11_pt4, effect: shape, processes: [DY_jfake, tt_jfake, ST_jfake, W_jfake], categories: [dm11_pt4], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.10}
+  - {name: jtf_dm11_pt5, effect: shape, processes: [DY_jfake, tt_jfake, ST_jfake, W_jfake], categories: [dm11_pt5], scales: {m_vis: sqrt, pt_2: linear}, shift: 0.10}
+
+scans:
+  # NO standalone 1D tes scan by design: tes is ONE POI correlated across
+  # the pT bins, so its value/error are the tes profile of these per-pT 2D
+  # scans (each is a 2D view of the one simultaneous fit; everything else
+  # profiled). points [tid, tes]: dense tes axis (step 0.002), tid ~1σ.
+  - {pois: [tid_SF_dm11_pt1, tes_dm11], points: [15, 51], ranges: [[0.7, 1.2], [0.95, 1.05]]}
+  - {pois: [tid_SF_dm11_pt2, tes_dm11], points: [15, 51], ranges: [[0.7, 1.2], [0.95, 1.05]]}
+  - {pois: [tid_SF_dm11_pt3, tes_dm11], points: [15, 51], ranges: [[0.7, 1.2], [0.95, 1.05]]}
+  - {pois: [tid_SF_dm11_pt4, tes_dm11], points: [15, 51], ranges: [[0.7, 1.2], [0.95, 1.05]]}
+  - {pois: [tid_SF_dm11_pt5, tes_dm11], points: [15, 51], ranges: [[0.7, 1.2], [0.95, 1.05]]}
+
+asimov:
+  enabled: false
+
+# TES morph -> CombineHarvester/cmsenv backend (CMSHistFunc morph + autoMCStats).
+combine:
+  cmssw: /afs/cern.ch/user/h/haawedik/CMSSW_14_1_0_pre4

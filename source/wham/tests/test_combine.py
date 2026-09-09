@@ -9,11 +9,15 @@ import pytest
 import uproot
 
 from wham.combine import (
+    CONTROL_CARD_FILE,
+    DATACARD_FILE,
+    HARVEST_CARD_FILE,
     dc_name,
     export_key,
     fit_templates,
     harvest_source,
     inject_toy_asymmetry,
+    merge_command,
     model_source,
     run_fit,
     scan_command,
@@ -112,7 +116,7 @@ systematics:
 {extra}""",
             encoding="utf-8",
         )
-        fit, cfg = load_fit_config(fit_yaml)
+        fit, cfg, cat_cfgs = load_fit_config(fit_yaml)
         samples, _ = discover_samples(cfg)
         skims = ensure_skims(union_analysis(fit, cfg), samples, workers=1)
         hists = {}
@@ -122,8 +126,9 @@ systematics:
                 ccfg, samples, skims, families=fit_families(fit),
                 only_vars=(cat.variable,), workers=1, sidecars=False,
             )
-        return {"fit": fit, "cfg": cfg, "hists": hists, "samples": samples,
-                "skims": skims, "tmp": workspace["tmp"], "yaml": fit_yaml}
+        return {"fit": fit, "cfg": cfg, "cat_cfgs": cat_cfgs, "hists": hists,
+                "samples": samples, "skims": skims, "tmp": workspace["tmp"],
+                "yaml": fit_yaml}
 
     return _make
 
@@ -246,25 +251,93 @@ def test_resolve_fit_config_errors(tmp_path: Path) -> None:
 # ------------------------------------------------------------- model source
 
 
-def test_scan_auto_window(fit_setup) -> None:
+def test_scan_window_defaults(fit_setup) -> None:
     fit = fit_setup("scale")["fit"]
     scan = fit.scans[0]  # 1D over r, no explicit range
 
-    # no fit result yet -> full POI range
-    cmd = scan_command(fit, scan, None)
-    assert "--setParameterRanges r=0,3" in cmd
+    # no explicit window -> the full POI range (no auto-windowing)
+    assert "--setParameterRanges r=0,3" in scan_command(fit, scan)
 
-    # with a fit result -> best fit +- 10 sigma, clipped to the POI range
-    fitresult = {"params": {"r": {"value": 1.0, "error": 0.02}}}
-    cmd = scan_command(fit, scan, fitresult)
-    assert "--setParameterRanges r=0.8,1.2" in cmd
-
-    wide = {"params": {"r": {"value": 0.1, "error": 0.5}}}
-    assert "--setParameterRanges r=0,3" in scan_command(fit, scan, wide)
-
-    # explicit range always wins
+    # explicit range wins
     fixed = scan.model_copy(update={"range": (0.5, 1.5)})
-    assert "--setParameterRanges r=0.5,1.5" in scan_command(fit, fixed, fitresult)
+    assert "--setParameterRanges r=0.5,1.5" in scan_command(fit, fixed)
+
+
+def test_scan_points_per_axis() -> None:
+    from wham.fitconfig import ScanCfg
+
+    # per-POI grid counts: 2D only, both > 1
+    ok = ScanCfg(pois=["a", "b"], points=(15, 51))
+    assert ok.points == (15, 51)
+    with pytest.raises(ValueError, match="2D scans only"):
+        ScanCfg(pois=["a"], points=(15, 51))
+    with pytest.raises(ValueError, match="at least 2 points per axis"):
+        ScanCfg(pois=["a", "b"], points=(15, 1))
+    with pytest.raises(ValueError, match="at least 2 points"):
+        ScanCfg(pois=["a"], points=1)
+
+
+def test_scan_command_grid_points(fit_setup) -> None:
+    from wham.fitconfig import ScanCfg
+
+    fit = fit_setup("components")["fit"]  # POIs: mu, alpha
+    sym = ScanCfg(pois=["mu", "alpha"], points=8)
+    cmd = scan_command(fit, sym)
+    assert "--points 64" in cmd and "--gridPoints" not in cmd
+
+    asym = ScanCfg(pois=["mu", "alpha"], points=(15, 51))
+    cmd = scan_command(fit, asym)
+    # combine ignores --points once --gridPoints is set (verified in the help)
+    assert "--gridPoints 15,51" in cmd and "--points 765" in cmd
+
+
+def test_fitdiag_seed(fit_setup) -> None:
+    from wham.combine import fitdiag_command
+
+    fit = fit_setup("scale")["fit"]  # fixture enables asimov
+    # Asimov: --setParameters defines the generated truth — seed must be ignored
+    assert "r=0.7" not in fitdiag_command(fit, seed={"r": 0.7})
+
+    # data fit: exactly one --setParameters flag, carrying the seed
+    data_fit = fit.model_copy(update={
+        "asimov": fit.asimov.model_copy(update={"enabled": False})})
+    cmd = fitdiag_command(data_fit, seed={"r": 0.7})
+    assert cmd.count("--setParameters ") == 1 and "r=0.7" in cmd
+    # no seed -> no flag at all (container backend, no asimov)
+    assert "--setParameters" not in fitdiag_command(data_fit)
+
+    # CH/morph backend: seed merges with the frozen r=1 into ONE flag
+    morph = FitConfig.model_validate(_morph_fit())
+    morph = morph.model_copy(update={
+        "asimov": morph.asimov.model_copy(update={"enabled": False})})
+    cmd = fitdiag_command(morph, seed={"tes_dm0": 0.978})
+    assert cmd.count("--setParameters ") == 1
+    assert "r=1" in cmd and "tes_dm0=0.978" in cmd
+
+
+def test_scan_seed(fit_setup, tmp_path: Path) -> None:
+    import numpy as np
+
+    from wham.combine import scan_seed
+
+    fit = fit_setup("scale")["fit"]
+    scan = fit.resolved_scans()[0]  # 1D over r
+
+    # a grid row deeper than the row-0 free fit -> its POI values are the seed
+    with uproot.recreate(tmp_path / scan_file(fit, scan)) as f:
+        f["limit"] = {"r": np.array([1.0, 0.6, 0.8, 1.2]),
+                      "deltaNLL": np.array([0.0, -3.0, 1.0, np.nan])}
+    assert scan_seed(tmp_path, fit) == {"r": pytest.approx(0.6)}
+
+    # nothing (meaningfully) below the free fit -> no seed
+    with uproot.recreate(tmp_path / scan_file(fit, scan)) as f:
+        f["limit"] = {"r": np.array([1.0, 0.6, 0.8]),
+                      "deltaNLL": np.array([0.0, 0.5, 1.0])}
+    assert scan_seed(tmp_path, fit) == {}
+
+    # missing scan file -> no seed
+    (tmp_path / scan_file(fit, scan)).unlink()
+    assert scan_seed(tmp_path, fit) == {}
 
 
 def test_model_source_scale(fit_setup) -> None:
@@ -401,8 +474,8 @@ scans:
 """,
         encoding="utf-8",
     )
-    fit, cfg = load_fit_config(fit_yaml)
-    samples, _ = discover_samples(cfg)
+    fit, cfg, _ = load_fit_config(fit_yaml)
+    samples, _w = discover_samples(cfg)
     skims = ensure_skims(union_analysis(fit, cfg), samples, workers=1)
     hists = {}
     for cat in fit.categories:
@@ -670,6 +743,22 @@ def test_datacard_only_skip_logic(fit_setup) -> None:
             {("SR", "datamc", "met_phi"): "DIFFERENT"}, datacard_only=True)
     assert card.stat().st_mtime_ns != mtime
 
+    # a datacard-only run must NOT mark the combine products fresh: run_key is
+    # only stamped by a completed full run, so a later full run reruns
+    # text2workspace/fit/scans even though old product files exist on disk
+    manifest = json.loads((fitdir / "manifest.json").read_text())
+    assert "run_key" not in manifest
+    # a full-run stamp survives datacard-only while the datacard is unchanged...
+    key = manifest["export_key"]
+    (fitdir / "manifest.json").write_text(json.dumps({"export_key": key, "run_key": key}))
+    run_fit(s["fit"], s["cfg"], s["hists"],
+            {("SR", "datamc", "met_phi"): "DIFFERENT"}, datacard_only=True)
+    assert json.loads((fitdir / "manifest.json").read_text()).get("run_key") == key
+    # ...and is dropped when the datacard regenerates (stale workspace)
+    run_fit(s["fit"], s["cfg"], s["hists"],
+            {("SR", "datamc", "met_phi"): "DIFFERENT2"}, datacard_only=True)
+    assert "run_key" not in json.loads((fitdir / "manifest.json").read_text())
+
 
 # ------------------------------------------------------------- container
 
@@ -785,6 +874,298 @@ def test_shape_systematic_scales_schema() -> None:
                       scales={"pt_2": "linear"}, shift=0.03)
 
 
+# ------------------------------------------------- control categories (CR)
+
+
+def _control_yaml(workspace: dict, *, clash: bool = False) -> Path:
+    """Second synthetic analysis (same data_dir, own name/selection/processes)
+    for cross-analysis control-category tests. clash=True names a process like
+    the model process to trigger the collision rejection."""
+    dy = "DY" if clash else "CDY"
+    path = workspace["tmp"] / f"control{'_clash' if clash else ''}.yaml"
+    path.write_text(
+        f"""
+name: test_control{"_clash" if clash else ""}
+lumi: 1000.0
+data_dir: {workspace["data_dir"]}
+output_dir: {workspace["tmp"] / "plots_control"}
+selection: "pt_1 > 30"
+trigger: "trg == 1"
+weight: weight
+processes:
+  CQCD: {{kind: qcd, color: "tab:olive"}}
+  CTT:  {{samples: ["TT_*"], color: "tab:purple"}}
+  {dy}:  {{samples: ["DY_*"], color: "tab:orange"}}
+  data: {{kind: data, samples: ["Muon_*"], color: black}}
+qcd:
+  method: abcd
+  os: "os == 1"
+  iso: "id_2 >= 5"
+  antiiso: "id_2 > 1 & id_2 < 5"
+sample_params:
+  TT_test: {{xs: 100.0, eff: 50000}}
+  DY_test: {{xs: 200.0, eff: 80000, filter_efficiency: 0.5}}
+variables:
+  m_vis: {{bins: 1, range: [50, 150]}}
+plots:
+  datamc: [m_vis]
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _fill_by_analysis(fit, cat_cfgs) -> dict:
+    """Mirror the cli fill driver: group categories by analysis, one
+    skim+fill pass per analysis with its own samples."""
+    groups: dict[int, tuple] = {}
+    for cat in fit.categories:
+        acfg = cat_cfgs[cat.name]
+        groups.setdefault(id(acfg), (acfg, []))[1].append(cat)
+    hists = {}
+    for acfg, cats in groups.values():
+        samples, _ = discover_samples(acfg)
+        skims = ensure_skims(union_analysis(fit, acfg, cats), samples, workers=1)
+        for cat in cats:
+            ccfg = category_analysis(fit, acfg, cat)
+            hists[cat.name] = fill_all(ccfg, samples, skims,
+                                       families=fit_families(fit),
+                                       only_vars=(cat.variable,), workers=1,
+                                       sidecars=False)
+    return hists
+
+
+def test_control_category_datacard(workspace: dict, tmp_path: Path) -> None:
+    """Container path: a control category from a second analysis becomes a
+    backgrounds-only bin; scoped systematics stay out of it, a shared-name
+    nuisance spans both analyses' DY columns."""
+    from wham.fitconfig import union_template_parents
+
+    control = _control_yaml(workspace)
+    fit_yaml = workspace["tmp"] / "crfit.yaml"
+    fit_yaml.write_text(
+        f"""
+name: crfit
+analysis: {workspace["yaml"]}
+categories:
+  - {{name: SR, variable: met_phi}}
+  - {{name: CR, variable: m_vis, analysis: {control}}}
+{_SCALE_MODEL}
+systematics:
+  - {{name: lumi, effect: lnN, processes: [TT, DY], scaleFactor: 1.025,
+      categories: [SR]}}
+  - {{name: xsec_dy, effect: lnN, processes: [DY, CDY], scaleFactor: 1.02}}
+""",
+        encoding="utf-8",
+    )
+    fit, cfg, cat_cfgs = load_fit_config(fit_yaml)
+    assert cat_cfgs["SR"] is cfg
+    assert cat_cfgs["CR"].name == "test_control"
+
+    hists = _fill_by_analysis(fit, cat_cfgs)
+    templates, signals, backgrounds = fit_templates(fit, cfg, hists,
+                                                    cat_cfgs=cat_cfgs)
+    assert signals == ["DY"]
+    t = templates["CR"]
+    assert "data_obs" in t and "CTT" in t and "CDY" in t
+    assert "DY" not in t and "TT" not in t  # main processes stay out of the CR
+    assert t["CDY"].axes[0].size == 1       # single counting bin
+    for name in ("CTT", "CDY"):
+        assert name in backgrounds
+
+    card = tmp_path / "datacard.txt"
+    write_datacard(card, fit=fit, templates=templates, signal_names=signals,
+                   background_names=backgrounds,
+                   parents=union_template_parents(fit, cfg, cat_cfgs))
+    text = card.read_text()
+    assert "imax 2" in text
+    bin_cells, proc_rows = None, []
+    for line in text.splitlines():
+        parts = line.split()
+        if parts and parts[0] == "bin":
+            bin_cells = parts[1:]
+        if parts and parts[0] == "process":
+            proc_rows.append(parts[1:])
+    names, ids = proc_rows
+    cols = list(zip(bin_cells, names, ids))
+    assert all(int(i) > 0 for b, n, i in cols if b == "CR")  # backgrounds-only
+    rows = {parts[0]: parts for parts in map(str.split, text.splitlines()) if parts}
+    lumi = dict(zip(zip(bin_cells, names), rows["lumi"][2:]))
+    assert lumi[("SR", "DY")] == "1.025"
+    assert all(v == "-" for (b, _n), v in lumi.items() if b == "CR")
+    xsec = dict(zip(zip(bin_cells, names), rows["xsec_dy"][2:]))
+    assert xsec[("SR", "DY")] == "1.02" and xsec[("CR", "CDY")] == "1.02"
+    assert all(v == "-" for (b, n), v in xsec.items() if n not in ("DY", "CDY"))
+
+
+def _split_fit(workspace: dict):
+    """Morph fit + control category: the CH split-cards path."""
+    control = _control_yaml(workspace)
+    fit_yaml = workspace["tmp"] / "splitfit.yaml"
+    fit_yaml.write_text(
+        f"""
+name: splitfit
+analysis: {workspace["yaml"]}
+categories:
+  - {{name: SR, variable: met_phi}}
+  - {{name: CR, variable: m_vis, analysis: {control}}}
+model:
+  pois:
+    mu: {{init: 1, range: [0, 3]}}
+  processes:
+    DY: {{scale: "mu"}}
+  morphs:
+    tes:
+      process: DY
+      grid: {{from: 0.9, to: 1.1, step: 0.05}}
+      categories: [SR]
+      scales: {{met_phi: sqrt}}
+      range: [0.9, 1.1]
+asimov: {{enabled: true}}
+combine: {{cmssw: {CMSSW_DIR or "/nonexistent/CMSSW"}}}
+scans:
+  - {{pois: [tes], points: 8}}
+systematics:
+  - {{name: lumi, effect: lnN, processes: [TT, DY], scaleFactor: 1.025,
+      categories: [SR]}}
+  - {{name: xsec_dy, effect: lnN, processes: [DY, CDY], scaleFactor: 1.02}}
+""",
+        encoding="utf-8",
+    )
+    return load_fit_config(fit_yaml)
+
+
+def test_control_category_ch_split(workspace: dict, tmp_path: Path) -> None:
+    """CH/morph fit with a control bin: harvest covers the main bins only
+    (the 1-bin CR is exempt from the shared-binning rule), the control card is
+    backgrounds-only WITH autoMCStats, and combineCards merges the two."""
+    from wham.fitconfig import union_template_parents
+
+    fit, cfg, cat_cfgs = _split_fit(workspace)  # loads: binning check passed
+    hists = _fill_by_analysis(fit, cat_cfgs)
+    templates, signals, backgrounds = fit_templates(fit, cfg, hists,
+                                                    cat_cfgs=cat_cfgs)
+    # morph grid templates exist in the main bin only
+    assert "DY_TES0.900" in templates["SR"] and "DY_TES0.900" not in templates["CR"]
+
+    parents = union_template_parents(fit, cfg, cat_cfgs)
+    present = {c: set(t) for c, t in templates.items()}
+    src = harvest_source(fit, cfg, present, parents, datacard=HARVEST_CARD_FILE)
+    assert "BINS = [[0, 'SR']]" in src          # control bin stays out of CH
+    assert "CDY" not in src and "'CR'" not in src
+    assert f'cb.WriteDatacard("{HARVEST_CARD_FILE}"' in src
+
+    card = tmp_path / CONTROL_CARD_FILE
+    write_datacard(card, fit=fit, templates=templates, signal_names=[],
+                   background_names=backgrounds, parents=parents,
+                   categories=["CR"])
+    text = card.read_text()
+    assert "imax 1" in text
+    assert "* autoMCStats 10" in text           # plain-TH1 bin keeps BBB
+    assert " DY " not in text                   # backgrounds-only: no model column
+    row = next(parts for parts in map(str.split, text.splitlines())
+               if parts and parts[0] == "xsec_dy")
+    assert "1.02" in row and "lumi" not in text.split()  # scoped syst absent
+
+    assert merge_command(fit) == (
+        f"combineCards.py .={HARVEST_CARD_FILE} .={CONTROL_CARD_FILE} "
+        f"> {DATACARD_FILE}")
+
+
+def test_control_category_rejections(workspace: dict) -> None:
+    control = _control_yaml(workspace)
+
+    # morph acting in a control bin
+    with pytest.raises(ValueError, match="morphs live in the main analysis"):
+        FitConfig.model_validate(_fit_dict(categories=[
+            {"name": "SR", "variable": "x"},
+            {"name": "CR", "variable": "x", "analysis": "other.yaml"},
+        ], model={
+            "pois": {"sf": {"range": [0, 3]}},
+            "processes": {"DY": {"scale": "sf"}},
+            "morphs": {"tes": {"process": "DY",
+                               "grid": {"from": 0.9, "to": 1.1, "step": 0.05},
+                               "categories": ["CR"], "range": [0.9, 1.1],
+                               "scales": {"x": "sqrt"}}},
+        }))
+
+    # scale map targeting a control bin
+    with pytest.raises(ValueError, match="scale maps control categories"):
+        FitConfig.model_validate(_fit_dict(categories=[
+            {"name": "SR", "variable": "x"},
+            {"name": "CR", "variable": "x", "analysis": "other.yaml"},
+        ], model={
+            "pois": {"sf": {"range": [0, 3]}},
+            "processes": {"DY": {"scale": {"SR": "sf", "CR": "sf"}}},
+        }))
+
+    # every category a control category
+    with pytest.raises(ValueError, match="at least one main-analysis category"):
+        FitConfig.model_validate(_fit_dict(categories=[
+            {"name": "CR", "variable": "x", "analysis": "other.yaml"},
+        ]))
+
+    def _load(cats: str, extra: str = "") -> None:
+        fit_yaml = workspace["tmp"] / "bad_cr.yaml"
+        fit_yaml.write_text(
+            f"""
+name: bad_cr
+analysis: {workspace["yaml"]}
+categories:
+{cats}
+{_SCALE_MODEL}
+{extra}""",
+            encoding="utf-8",
+        )
+        load_fit_config(fit_yaml)
+
+    # control variable must exist in the CONTROL analysis
+    with pytest.raises(ValueError, match="not defined in .*control"):
+        _load(f"""  - {{name: SR, variable: met_phi}}
+  - {{name: CR, variable: met_phi, analysis: {control}}}""")
+
+    # control process colliding with a model process name
+    with pytest.raises(ValueError, match="collide with model process"):
+        _load(f"""  - {{name: SR, variable: met_phi}}
+  - {{name: CR, variable: m_vis, analysis: {_control_yaml(workspace, clash=True)}}}""")
+
+    # an unscoped shape systematic must resolve in the control analysis too
+    with pytest.raises(ValueError, match="matches no kind=mc process"):
+        _load(f"""  - {{name: SR, variable: met_phi}}
+  - {{name: CR, variable: m_vis, analysis: {control}}}""",
+              extra="""systematics:
+  - {name: tt_shape, effect: shape, processes: [TT],
+     weight_up: "weight * 2", weight_down: "weight * 0.5"}
+""")
+
+    # ... but a main-scoped one is fine
+    _load(f"""  - {{name: SR, variable: met_phi}}
+  - {{name: CR, variable: m_vis, analysis: {control}}}""",
+          extra="""systematics:
+  - {name: tt_shape, effect: shape, processes: [TT], categories: [SR],
+     weight_up: "weight * 2", weight_down: "weight * 0.5"}
+""")
+
+
+@pytest.mark.combine
+@pytest.mark.skipif(CMSSW_DIR is None, reason="no CMSSW with CombineHarvester available")
+def test_control_ch_split_cmsenv(workspace: dict) -> None:
+    """Split-cards export end-to-end under cmsenv: harvest writes the morph
+    card, WHAM the control card, combineCards.py merges them with the bin
+    names preserved."""
+    fit, cfg, cat_cfgs = _split_fit(workspace)
+    hists = _fill_by_analysis(fit, cat_cfgs)
+    keys = {("SR", "datamc", "met_phi"): "k", ("CR", "datamc", "m_vis"): "k2"}
+    fitdir = run_fit(fit, cfg, hists, keys, cat_cfgs=cat_cfgs, datacard_only=True)
+
+    assert (fitdir / CONTROL_CARD_FILE).is_file()
+    assert (fitdir / HARVEST_CARD_FILE).is_file()
+    merged = (fitdir / DATACARD_FILE).read_text()
+    assert "CR" in merged and "SR" in merged     # bin names preserved by '.='
+    assert "CDY" in merged and "autoMCStats" in merged
+    assert "morph" in merged                     # CH morph shapes lines intact
+
+
 def test_shape_variations_column_shift(workspace: dict) -> None:
     """A scales+shift shape systematic resolves into an up/down pair of
     columns-target fill variations with the per-law factors."""
@@ -810,7 +1191,7 @@ systematics:
 """,
         encoding="utf-8",
     )
-    fit, cfg = load_fit_config(fit_yaml)
+    fit, cfg, _ = load_fit_config(fit_yaml)
     vars_ = shape_variations(fit, cfg)
     assert [v.name for v in vars_] == ["jtf_up", "jtf_down"]
     assert all(v.target == "columns" and v.processes == ["TT"] for v in vars_)
@@ -821,3 +1202,19 @@ systematics:
     assert down.factors["m_vis"] == pytest.approx(math.sqrt(0.90))
     # slice labels line up with the datacard's {name}Up/Down template suffixes
     assert up.slice_labels() == ["jtf_up"] and down.slice_labels() == ["jtf_down"]
+
+
+def test_tau_sf_fit_configs_load() -> None:
+    """Repo guard: the 10 tau_sf fit configs stay loadable, with single top
+    split out of tt (ST/ST_lfake/ST_jfake + xsec_st, ST in the zmm stack)."""
+    repo = Path(__file__).resolve().parents[3]
+    paths = sorted(repo.glob("Configurations/tau_sf/*/tau_sf_dm*.yaml"))
+    if len(paths) != 10:
+        pytest.skip("tau_sf configs not present")
+    for path in paths:
+        fit, cfg, cat_cfgs = load_fit_config(path)
+        assert {"ST", "ST_lfake", "ST_jfake"} <= set(cfg.processes)
+        for parent in ("tt", "tt_lfake", "tt_jfake"):
+            assert cfg.processes[parent].samples == ["TTto*"]
+        assert any(s.name == "xsec_st" for s in fit.systematics)
+        assert "ST" in cat_cfgs["zmm"].processes

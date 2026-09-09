@@ -45,16 +45,19 @@ from wham.fitconfig import (
     FitConfig,
     ScanCfg,
     all_pois,
+    control_categories,
     datacard_processes,
     dc_name,
     fpoint_str,
     grid_points,
+    main_categories,
     morph_point_label,
     scale_entries,
     shape_affected,
     syst_matches,
-    template_parents,
     translate_formula,
+    union_datacard_processes,
+    union_template_parents,
 )
 
 SHAPES_FILE = "shapes.root"
@@ -70,6 +73,13 @@ DUMP_SCRIPT_FILE = "dump_fitresult.py"
 # datacard + shapes; combine then runs under cmsenv, not the standalone container.
 CH_HARVEST_FILE = "harvest.py"
 CH_SHAPES_FILE = "ch_shapes.root"  # CH-written shapes (morph ws + extracted TH1)
+
+# Split cards, used when a CH/morph fit also has control categories: the morph
+# bins go through harvest.py (-> HARVEST_CARD_FILE), the control bins are a
+# WHAM-written plain-TH1 card, and combineCards.py merges them into
+# DATACARD_FILE before text2workspace (mixed binning is fine at that level).
+HARVEST_CARD_FILE = "harvest_datacard.txt"
+CONTROL_CARD_FILE = "control_card.txt"
 
 
 def morph_template_name(dc_proc: str, morph_name: str, f: float) -> str:
@@ -280,6 +290,7 @@ def harvest_source(
     present: dict[str, set[str]],
     parents: dict[str, str],
     shape_affected_map: dict[str, set[str]] | None = None,
+    datacard: str = DATACARD_FILE,
 ) -> str:
     """Generate the cmsenv CombineHarvester driver for a morph fit.
 
@@ -287,6 +298,8 @@ def harvest_source(
     bin (zero-yield backgrounds are dropped), so the CH model matches the shapes.
     Only the bare-POI scales + single TES morph used by the SF measurement are
     supported (a formula scale would need a PhysicsModel, which CH does not run).
+    Control categories are excluded — they are merged in later at the datacard
+    level (combineCards.py), so `datacard` is HARVEST_CARD_FILE in that case.
     """
     if "r" in all_pois(fit):
         raise ValueError(
@@ -307,7 +320,7 @@ def harvest_source(
             f"(model templates {signal_names}, morph process '{signal}')"
         )
 
-    cats = [c.name for c in fit.categories]
+    cats = [c.name for c in main_categories(fit)]
     bins = [[i, c] for i, c in enumerate(cats)]
     bkg = {c: [b for b in background_names if b in present.get(c, set())] for c in cats}
     masses = [f"{f:.3f}" for f in grid_points(morph.grid)]
@@ -318,7 +331,9 @@ def harvest_source(
 
     lnn, shapesys = [], []
     for syst in fit.systematics:
-        sbins = list(syst.categories) if syst.categories is not None else cats
+        # control bins live in the separate control card, not in CH
+        sbins = [b for b in (syst.categories if syst.categories is not None else cats)
+                 if b in cats]
         if syst.effect == "lnN":
             procs = sorted({
                 n for c in sbins for n in all_dc
@@ -354,7 +369,8 @@ def harvest_source(
     for syst in fit.systematics:
         if syst.effect != "rateParam":
             continue
-        sbins = list(syst.categories) if syst.categories is not None else cats
+        sbins = [b for b in (syst.categories if syst.categories is not None else cats)
+                 if b in cats]
         rng = list(syst.range) if syst.range else None
         for c in sbins:
             for n in all_dc:
@@ -363,7 +379,7 @@ def harvest_source(
                                        "init": syst.init, "range": rng})
 
     return _HARVEST_TEMPLATE.format(
-        name=fit.name, shapes=SHAPES_FILE, datacard=DATACARD_FILE, ch_shapes=CH_SHAPES_FILE,
+        name=fit.name, shapes=SHAPES_FILE, datacard=datacard, ch_shapes=CH_SHAPES_FILE,
         bins=repr(bins), bkg=repr(bkg), signal=repr(signal)[1:-1],
         masses=repr(masses), tes=mname, tes_range=repr(list(morph.range)),
         lnn=repr(lnn), shapesys=repr(shapesys), rateparams=repr(rateparams),
@@ -403,38 +419,47 @@ def inject_toy_asymmetry(first_h, second_h, asymmetry: float) -> None:
 
 
 def fit_templates(
-    fit: FitConfig, cfg: AnalysisConfig, hists_by_cat: dict[str, dict], console=None
+    fit: FitConfig, cfg: AnalysisConfig, hists_by_cat: dict[str, dict], console=None,
+    cat_cfgs: dict[str, AnalysisConfig] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], list[str], list[str]]:
     """Build datacard templates for every category.
 
     Returns (templates, signal_names, background_names) where templates is
     {category: {datacard_name: 1D hist}} including 'data_obs'. Zero-yield
     backgrounds are dropped per category; background_names keeps the union.
+    A control category slices its OWN analysis (`cat_cfgs`): its processes,
+    data process, signal region and QCD estimate; never the model's
+    scales/components/morph grids.
     """
-    region = signal_region(cfg)
-    signal_names, backgrounds = datacard_processes(fit, cfg)
-    shape_systs = [(s, shape_affected(fit, cfg, s))
-                   for s in fit.systematics if s.effect == "shape"]
-
-    def shape_slices(cat_name: str, proc: str):
-        """(syst, datacard suffix, variation label) triples for one process."""
-        for syst, affected in shape_systs:
-            if syst.categories is not None and cat_name not in syst.categories:
-                continue
-            if proc not in affected:
-                continue
-            yield from ((syst, f"{syst.name}Up", f"{syst.name}_up"),
-                        (syst, f"{syst.name}Down", f"{syst.name}_down"))
+    cat_cfgs = cat_cfgs or {}
+    signal_names, backgrounds = union_datacard_processes(fit, cfg, cat_cfgs)
 
     templates: dict[str, dict[str, Any]] = {}
     for cat in fit.categories:
+        ccfg = cat_cfgs.get(cat.name, cfg)
+        region = signal_region(ccfg)
+        shape_systs = [(s, shape_affected(fit, ccfg, s))
+                       for s in fit.systematics if s.effect == "shape"]
+
+        def shape_slices(cat_name: str, proc: str):
+            """(syst, datacard suffix, variation label) triples for one process."""
+            for syst, affected in shape_systs:
+                if syst.categories is not None and cat_name not in syst.categories:
+                    continue
+                if proc not in affected:
+                    continue
+                yield from ((syst, f"{syst.name}Up", f"{syst.name}_up"),
+                            (syst, f"{syst.name}Down", f"{syst.name}_down"))
+
         hists = hists_by_cat[cat.name]
         h_datamc = hists[("datamc", cat.variable)]
         t: dict[str, Any] = {
-            "data_obs": _slice1d(h_datamc, cfg.data_process(), region)
+            "data_obs": _slice1d(h_datamc, ccfg.data_process(), region)
         }
-        for proc in cfg.stack_order():
-            pm = fit.model.processes.get(proc)
+        for proc in ccfg.stack_order():
+            # the model acts in main-analysis bins only (a control process
+            # sharing a model process name is rejected at load time)
+            pm = fit.model.processes.get(proc) if cat.analysis is None else None
             if pm is None or pm.components is None:
                 h1 = _slice1d(h_datamc, proc, region)
                 _clip_negative(h1, f"{cat.name}/{proc}", console)
@@ -527,6 +552,57 @@ def write_shapes(path: Path, templates: dict[str, dict[str, Any]]) -> None:
                 f[f"{bin_name}/{name}"] = clean
 
 
+def _rename_templates(
+    templates: dict[str, dict[str, Any]], process_map: dict[str, str]
+) -> dict[str, dict[str, Any]]:
+    """Return a shallow template map with datacard process names remapped."""
+    if not process_map:
+        return templates
+    mapped: dict[str, dict[str, Any]] = {}
+    for bin_name, by_name in templates.items():
+        mapped[bin_name] = {
+            process_map.get(name, name): h1 for name, h1 in by_name.items()
+        }
+    return mapped
+
+
+def stage_export_shapes(fitdir: Path, fit: FitConfig, templates: dict[str, dict[str, Any]],
+                        console=None) -> None:
+    """Stage shapes for an external workflow declared in fit.export."""
+    if fit.export is None or fit.export.stage_dir is None:
+        return
+    stage_dir = Path(fit.export.stage_dir)
+    if not stage_dir.is_absolute():
+        stage_dir = util.repo_root() / stage_dir
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    out = stage_dir / fit.export.output_file
+    staged_templates = _rename_templates(templates, fit.export.process_map)
+    write_shapes(out, staged_templates)
+    if fit.export.write_manifest:
+        manifest = {
+            "target": fit.export.target,
+            "source_fit_dir": str(fitdir),
+            "shapes": str(out),
+            "categories": list(staged_templates),
+            "templates": {cat: sorted(by_name) for cat, by_name in staged_templates.items()},
+            "process_map": fit.export.process_map,
+        }
+        (stage_dir / "wham_export_manifest.json").write_text(
+            json.dumps(manifest, indent=2), encoding="utf-8"
+        )
+    if console is not None:
+        console.print(f"  [green]staged[/green] external shapes -> {out}")
+
+
+def staged_export_path(fit: FitConfig) -> Path | None:
+    if fit.export is None or fit.export.stage_dir is None:
+        return None
+    stage_dir = Path(fit.export.stage_dir)
+    if not stage_dir.is_absolute():
+        stage_dir = util.repo_root() / stage_dir
+    return stage_dir / fit.export.output_file
+
+
 def write_datacard(
     path: Path,
     *,
@@ -536,10 +612,14 @@ def write_datacard(
     background_names: list[str],
     parents: dict[str, str] | None = None,
     shape_affected_map: dict[str, set[str]] | None = None,
+    categories: list[str] | None = None,
 ) -> None:
-    """Multi-bin datacard: one column per (category, process present there)."""
+    """Multi-bin datacard: one column per (category, process present there).
+    `categories` restricts the card to a subset of bins — used for the
+    control card of a split (CH morph + control bins) fit, with
+    signal_names=[] so every control process gets a positive (background) id."""
     parents = parents or {}
-    cats = [c.name for c in fit.categories]
+    cats = categories if categories is not None else [c.name for c in fit.categories]
     order = signal_names + background_names
     # process ids: model templates get 0, -1, ...; backgrounds 1..N
     ids = {n: -i for i, n in enumerate(signal_names)}
@@ -584,14 +664,18 @@ def write_datacard(
                 else "-"
                 for c, n in columns
             ]
-            lines.append(row(syst.name, syst.effect, cells))
         elif syst.effect == "shape":
             affected = (shape_affected_map or {}).get(syst.name, set())
             cells = [
                 "1" if allowed(syst, c) and parents.get(n, n) in affected else "-"
                 for c, n in columns
             ]
-            lines.append(row(syst.name, "shape", cells))
+        else:
+            continue
+        # a systematic scoped away from every bin of this card (e.g. a
+        # main-bin nuisance on the control card) would be an all-dash row
+        if any(c != "-" for c in cells):
+            lines.append(row(syst.name, syst.effect, cells))
 
     # rateParam: free normalization parameters, one line per matching
     # (bin, process); the shared name makes them one parameter in combine
@@ -605,11 +689,26 @@ def write_datacard(
 
     # autoMCStats builds a per-bin stat model that calls getXVar() on every
     # process pdf; the external RooMomentMorph used for TES morphing lacks that
-    # combine method, so it is incompatible — skip it when morphs are present.
-    if fit.auto_mc_stats is not None and not fit.model.morphs:
+    # combine method, so it is incompatible — skip it when the CARD contains
+    # morph bins. A control card of a morph fit has none (its bins are plain
+    # TH1 channels merged in by combineCards.py), so it keeps autoMCStats.
+    morph_bins = {b for m in fit.model.morphs.values() for b in m.categories}
+    if fit.auto_mc_stats is not None and not (set(cats) & morph_bins):
         lines.append(f"* autoMCStats {fit.auto_mc_stats}")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def merge_command(fit: FitConfig) -> str:
+    """combineCards.py merge of the CH morph card with the control card.
+    The '.=' labels keep the original bin names (combineCards uses the child
+    card's own bin names when the label is '.'), so render/fitsummary lookups
+    by category name keep working; allowNoSignal is hard-enabled inside
+    combineCards, so the backgrounds-only control card merges cleanly. Both
+    cards sit next to shapes.root/ch_shapes.root in the scratch cwd, keeping
+    the relative shape paths valid for text2workspace."""
+    return (f"combineCards.py .={HARVEST_CARD_FILE} .={CONTROL_CARD_FILE} "
+            f"> {DATACARD_FILE}")
 
 
 def export_key(fit: FitConfig, input_hist_keys: dict) -> str:
@@ -618,10 +717,12 @@ def export_key(fit: FitConfig, input_hist_keys: dict) -> str:
             "fit": fit.model_dump(mode="json"),
             "hists": {"/".join(map(str, k)): v for k, v in sorted(input_hist_keys.items())},
             "version": __version__,
-            # the combine invocations themselves (fitresult-independent form):
-            # option changes (e.g. minimizer tolerance) must retrigger the run
+            # the combine invocations themselves: option changes (e.g. a scan
+            # window or minimizer tolerance) must retrigger the run
             "commands": [fitdiag_command(fit)]
-            + [scan_command(fit, s, None) for s in fit.resolved_scans()],
+            + [scan_command(fit, s) for s in fit.resolved_scans()]
+            # conditional so morph-only fits keep their existing keys
+            + ([merge_command(fit)] if control_categories(fit) else []),
         }
     )
 
@@ -716,7 +817,7 @@ def _poi_redef(fit: FitConfig) -> str:
     return f"--redefineSignalPOIs {','.join(all_pois(fit))} " if fit.model.morphs else ""
 
 
-def _common_fit_opts(fit: FitConfig) -> str:
+def _common_fit_opts(fit: FitConfig, extra_params: dict[str, float] | None = None) -> str:
     opts: list[str] = []
     params: dict[str, float] = {}
     if fit.asimov.enabled:
@@ -724,6 +825,8 @@ def _common_fit_opts(fit: FitConfig) -> str:
         params.update({p: pcfg.init for p, pcfg in fit.model.pois.items()})
         params.update({m: mc.init for m, mc in fit.model.morphs.items()})
         params.update(fit.asimov.parameters)
+    if extra_params:
+        params.update(extra_params)
     if ch_backend(fit):
         # CH's default model keeps the signal-strength r; the SFs/TES are the real
         # POIs (promoted via _poi_redef), so r is pinned to 1.
@@ -743,15 +846,19 @@ def _common_fit_opts(fit: FitConfig) -> str:
     return " ".join(opts)
 
 
-def fitdiag_command(fit: FitConfig) -> str:
+def fitdiag_command(fit: FitConfig, seed: dict[str, float] | None = None) -> str:
     # --robustHesse is required for the CH backend's postfit error band: with the
     # ~O(100) autoMCStats bin parameters the default Hesse gives covQual<3 and a
     # zero-width band; robustHesse recovers it.
     robust = "--robustHesse 1 " if ch_backend(fit) else ""
+    # `seed` starts Migrad from the global scan minimum (see scan_seed) — data
+    # fits only: for Asimov, --setParameters defines the GENERATED truth, and a
+    # seed would silently change the dataset instead of the starting point.
+    extra = None if fit.asimov.enabled else seed
     return (
         f"combine -M FitDiagnostics {WORKSPACE_FILE} -n .{fit.name} "
         f"--saveShapes --saveWithUncertainties -v 1 {robust}"
-        f"{_poi_redef(fit)}{_common_fit_opts(fit)}"
+        f"{_poi_redef(fit)}{_common_fit_opts(fit, extra)}"
     )
 
 
@@ -759,39 +866,35 @@ def scan_tag(scan: ScanCfg) -> str:
     return "_".join(scan.pois)
 
 
-def scan_window(
-    fit: FitConfig, scan: ScanCfg, poi: str, index: int,
-    fitresult: dict | None,
-) -> tuple[float, float]:
+def scan_window(fit: FitConfig, scan: ScanCfg, poi: str, index: int) -> tuple[float, float]:
     """Scan window for one POI: the explicit range/ranges entry if given,
-    else best fit +- 10 sigma (clipped to the POI range) so the grid
-    resolves the minimum, else the full POI range."""
+    else the full POI range."""
     if len(scan.pois) == 1 and scan.range is not None:
         return scan.range
     if len(scan.pois) == 2 and scan.ranges is not None:
         return tuple(scan.ranges[index])
     pcfg = fit.model.pois.get(poi) or fit.model.morphs[poi]  # rate or morph POI
-    lo, hi = pcfg.range
-    params = (fitresult or {}).get("params", {})
-    if poi in params and params[poi].get("error", 0) > 0:
-        best, sigma = params[poi]["value"], params[poi]["error"]
-        return max(lo, best - 10 * sigma), min(hi, best + 10 * sigma)
-    return lo, hi
+    return pcfg.range
 
 
-def scan_command(fit: FitConfig, scan: ScanCfg, fitresult: dict | None = None) -> str:
+def scan_command(fit: FitConfig, scan: ScanCfg) -> str:
     ranges = [
         f"{poi}={lo:g},{hi:g}"
         for i, poi in enumerate(scan.pois)
-        for lo, hi in [scan_window(fit, scan, poi, i, fitresult)]
+        for lo, hi in [scan_window(fit, scan, poi, i)]
     ]
-    points = scan.points if len(scan.pois) == 1 else scan.points**2
+    if isinstance(scan.points, tuple):  # asymmetric 2D grid, per-POI counts
+        nx, ny = scan.points
+        # combine ignores --points once --gridPoints is set; kept for log clarity
+        grid_opts = f"--points {nx * ny} --gridPoints {nx},{ny}"
+    else:
+        grid_opts = f"--points {scan.points if len(scan.pois) == 1 else scan.points ** 2}"
     # with multiple POIs, the un-scanned ones must be profiled (not frozen at
     # their inits) for a correct 1D/2D scan — e.g. tes per DM + the ID SFs
     float_others = "--floatOtherPOIs 1 " if len(all_pois(fit)) > len(scan.pois) else ""
     return (
         f"combine -M MultiDimFit {WORKSPACE_FILE} -n .scan_{fit.name}_{scan_tag(scan)} "
-        f"--algo grid --points {points} -v 1 {_poi_redef(fit)}{float_others}"
+        f"--algo grid {grid_opts} -v 1 {_poi_redef(fit)}{float_others}"
         + " ".join(f"-P {p}" for p in scan.pois)
         + f" --setParameterRanges {':'.join(ranges)} --saveNLL "
         f"{_common_fit_opts(fit)}"
@@ -809,15 +912,51 @@ def scan_file(fit: FitConfig, scan: ScanCfg) -> str:
     return f"higgsCombine.scan_{fit.name}_{scan_tag(scan)}.MultiDimFit.mH120.root"
 
 
+def scan_seed(fitdir: Path, fit: FitConfig) -> dict[str, float]:
+    """POI values at the globally deepest scan point, when it undercuts the
+    free fit — used to START FitDiagnostics there. The tes-jtf landscape is
+    bimodal and Migrad from init can converge into a shallower basin (seen:
+    10 units of 2ΔlnL above the scan minimum); the grid scans map every basin,
+    so the fit is restarted from the deepest one. deltaNLL values are
+    comparable across scan files (each row 0 is the same free fit). Empty when
+    no scan point meaningfully beats the free fit."""
+    import numpy as np
+    import uproot
+
+    best: dict[str, float] = {}
+    deepest = -0.05  # deltaNLL units: require a real improvement, not noise
+    for scan in fit.resolved_scans():
+        path = fitdir / scan_file(fit, scan)
+        if not path.is_file():
+            continue
+        try:
+            with uproot.open(path) as f:
+                tree = f["limit"]
+                arrays = {b: tree[b].array(library="np")[1:]
+                          for b in [*scan.pois, "deltaNLL"]}
+        except Exception:
+            continue  # unreadable/partial scan output: no seed from this scan
+        d = np.where(np.isfinite(arrays["deltaNLL"]), arrays["deltaNLL"], np.inf)
+        if not len(d):
+            continue
+        i = int(np.argmin(d))
+        if d[i] < deepest:
+            deepest = float(d[i])
+            best = {p: float(arrays[p][i]) for p in scan.pois}
+    return best
+
+
 def run_fit(
     fit: FitConfig,
     cfg: AnalysisConfig,
     hists_by_cat: dict[str, dict],
     input_hist_keys: dict,
     *,
+    cat_cfgs: dict[str, AnalysisConfig] | None = None,
     console=None,
     force: bool = False,
     datacard_only: bool = False,
+    shapes_only: bool = False,
 ) -> Path:
     """Export datacard/shapes/model and run combine, skipping fresh stages.
 
@@ -830,45 +969,95 @@ def run_fit(
     manifest_path = fitdir / "manifest.json"
 
     key = export_key(fit, input_hist_keys)
-    old_key = None
+    # export_key: the datacard/shapes in fitdir match this key.
+    # run_key: the workspace/fit/scan products were built FROM that datacard.
+    # A --datacard-only run refreshes the former but must invalidate the
+    # latter, else a later full run mistakes the old workspace/fitdiag/scans
+    # for current (they exist on disk but predate the new datacard).
+    old_key = old_run_key = None
     if manifest_path.is_file() and not force:
         try:
-            old_key = json.loads(manifest_path.read_text()).get("export_key")
+            manifest = json.loads(manifest_path.read_text())
+            old_key = manifest.get("export_key")
+            old_run_key = manifest.get("run_key")
         except json.JSONDecodeError:
-            old_key = None
+            pass
 
     def missing(name: str) -> bool:
         return not (fitdir / name).is_file()
 
     ch = ch_backend(fit)
     cmssw = cmssw_base(fit) if ch else None  # resolve early: clear error if unset
+
+    cat_cfgs = cat_cfgs or {}
+    ctrl = [c.name for c in control_categories(fit)]
+
+    # A CH/morph fit with control bins runs split cards: harvest.py writes the
+    # morph card, WHAM the plain control card, combineCards.py merges them.
+    split_cards = ch and bool(ctrl)
+    harvest_card = HARVEST_CARD_FILE if split_cards else DATACARD_FILE
+
+    native_datacard = not shapes_only and (fit.export is None or fit.export.write_native_datacard)
+    staged_path = staged_export_path(fit)
+
     stale = force or key != old_key
-    do_export = (
-        stale or missing(SHAPES_FILE)
-        or (missing(CH_HARVEST_FILE) if ch
-            else (missing(DATACARD_FILE) or missing(MODEL_FILE)))
-    )
+    stale_run = force or key != old_run_key
+
+    if ch:
+        export_missing = (missing(CH_HARVEST_FILE) or (split_cards and missing(CONTROL_CARD_FILE)))
+    else:
+        export_missing = (native_datacard and (missing(DATACARD_FILE) or missing(MODEL_FILE)))
+
+    do_export = (stale or missing(SHAPES_FILE) or (staged_path is not None and not staged_path.is_file()) or export_missing)
     # CH builds the datacard itself (needs cmsenv), so it is a run stage, not an
     # export; the container path writes its datacard at export time.
     if ch:
-        do_harvest = do_export or missing(DATACARD_FILE) or missing(CH_SHAPES_FILE)
-        do_t2w = do_harvest or missing(WORKSPACE_FILE)
+        do_harvest = do_export or missing(harvest_card) or missing(CH_SHAPES_FILE)
+        do_merge = split_cards and (do_harvest or missing(DATACARD_FILE))
+        do_t2w = do_harvest or do_merge or stale_run or missing(WORKSPACE_FILE)
     else:
         do_harvest = False
-        do_t2w = do_export or missing(WORKSPACE_FILE)
-    do_fitdiag = do_t2w or missing(fitdiag_file(fit))
-    do_dump = do_fitdiag or missing(FITRESULT_FILE)
+        do_merge = False
+        do_t2w = do_export or stale_run or missing(WORKSPACE_FILE)
     scans = fit.resolved_scans()
+    run_scan = [do_t2w or missing(scan_file(fit, s)) for s in scans]
+    # scans run BEFORE FitDiagnostics: they map the (possibly multi-basin)
+    # likelihood, and FitDiagnostics is then seeded at the deepest scan point —
+    # so a rerun scan (which can move the seed) also retriggers the fit
+    do_fitdiag = do_t2w or any(run_scan) or missing(fitdiag_file(fit))
+    do_dump = do_fitdiag or missing(FITRESULT_FILE)
 
-    templates, signal_names, background_names = fit_templates(fit, cfg, hists_by_cat, console)
-    parents = template_parents(fit, cfg)
-    shape_affected_map = {
-        s.name: shape_affected(fit, cfg, s) for s in fit.systematics if s.effect == "shape"
-    }
+    templates, signal_names, background_names = fit_templates(
+        fit, cfg, hists_by_cat, console, cat_cfgs=cat_cfgs)
+    parents = union_template_parents(fit, cfg, cat_cfgs)
+    # shape-affected processes per systematic: union over the analyses of the
+    # bins it acts in (a bin-scoped systematic must not be resolved against a
+    # control analysis it never touches — shape_affected would fall back to
+    # that analysis's QCD process and spuriously mark it affected)
+    cfg_bins: list[tuple[AnalysisConfig, set[str]]] = []
+    for cat in fit.categories:
+        acfg = cat_cfgs.get(cat.name, cfg)
+        for entry in cfg_bins:
+            if entry[0] is acfg:
+                entry[1].add(cat.name)
+                break
+        else:
+            cfg_bins.append((acfg, {cat.name}))
+    shape_affected_map: dict[str, set[str]] = {}
+    for s in fit.systematics:
+        if s.effect != "shape":
+            continue
+        affected: set[str] = set()
+        for acfg, bins in cfg_bins:
+            if s.categories is not None and not (bins & set(s.categories)):
+                continue
+            affected |= shape_affected(fit, acfg, s)
+        shape_affected_map[s.name] = affected
 
     def _harvest() -> str:
         return harvest_source(
-            fit, cfg, {c: set(t) for c, t in templates.items()}, parents, shape_affected_map,
+            fit, cfg, {c: set(t) for c, t in templates.items()}, parents,
+            shape_affected_map, datacard=harvest_card,
         )
 
     if do_export:
@@ -878,14 +1067,26 @@ def run_fit(
             encoding="utf-8",
         )
         write_shapes(fitdir / SHAPES_FILE, templates)
+        stage_export_shapes(fitdir, fit, templates, console)
         if ch:
             (fitdir / CH_HARVEST_FILE).write_text(_harvest(), encoding="utf-8")
+            if split_cards:
+                # plain-TH1 card for the control bins, merged by combineCards
+                write_datacard(
+                    fitdir / CONTROL_CARD_FILE,
+                    fit=fit, templates=templates,
+                    signal_names=[], background_names=background_names,
+                    parents=parents, shape_affected_map=shape_affected_map,
+                    categories=ctrl,
+                )
             if console is not None:
                 console.print(
                     f"  [green]exported[/green] {fitdir / CH_HARVEST_FILE} "
                     "(CombineHarvester / cmsenv backend)"
+                    + (f" + {CONTROL_CARD_FILE} ({', '.join(ctrl)})"
+                       if split_cards else "")
                 )
-        else:
+        elif native_datacard:
             write_datacard(
                 fitdir / DATACARD_FILE,
                 fit=fit, templates=templates,
@@ -895,16 +1096,10 @@ def run_fit(
             (fitdir / MODEL_FILE).write_text(model_source(fit), encoding="utf-8")
             if console is not None:
                 console.print(f"  [green]exported[/green] {fitdir / DATACARD_FILE}")
+        elif console is not None:
+            console.print("  [green]exported[/green] shapes only")
     elif console is not None:
         console.print("  datacard/shapes up to date")
-
-    def _fitresult() -> dict | None:
-        # available to the scan stages: the dump stage runs (and is copied
-        # back) before them, supplying best fit + sigma for auto-windowing
-        try:
-            return json.loads((fitdir / FITRESULT_FILE).read_text())
-        except (OSError, json.JSONDecodeError):
-            return None
 
     def run_stages(stages: list) -> None:
         """Run the listed (label, do, command, products) stages in a local
@@ -923,9 +1118,13 @@ def run_fit(
             if ch:
                 # the harvester reads shapes.root and writes datacard + ch_shapes
                 (scratch / CH_HARVEST_FILE).write_text(_harvest(), encoding="utf-8")
+                if split_cards:
+                    shutil.copy2(fitdir / CONTROL_CARD_FILE, scratch)
                 if not do_harvest:  # cached datacard/shapes for skipped harvest
-                    shutil.copy2(fitdir / DATACARD_FILE, scratch)
+                    shutil.copy2(fitdir / harvest_card, scratch)
                     shutil.copy2(fitdir / CH_SHAPES_FILE, scratch)
+                if split_cards and not do_merge:
+                    shutil.copy2(fitdir / DATACARD_FILE, scratch)
             else:
                 shutil.copy2(fitdir / DATACARD_FILE, scratch)
                 (scratch / MODEL_FILE).write_text(model_source(fit), encoding="utf-8")
@@ -939,7 +1138,7 @@ def run_fit(
                     if console is not None:
                         console.print(f"  {label}: up to date")
                     continue
-                if callable(command):  # scan windows depend on the dump stage
+                if callable(command):  # FitDiagnostics: seeded from the scans
                     command = command()
                 t0 = time.perf_counter()
                 log_lines.append(f"$ {command}")
@@ -958,27 +1157,42 @@ def run_fit(
             shutil.rmtree(scratch, ignore_errors=True)
 
     harvest_stage = ("harvest datacard (CombineHarvester)", do_harvest,
-                     f"python3 {CH_HARVEST_FILE}", [DATACARD_FILE, CH_SHAPES_FILE])
+                     f"python3 {CH_HARVEST_FILE}", [harvest_card, CH_SHAPES_FILE])
+    merge_stage = ("combineCards merge", do_merge, merge_command(fit), [DATACARD_FILE])
+    card_stages = ([harvest_stage, merge_stage] if split_cards
+                   else [harvest_stage]) if ch else []
 
-    if datacard_only:
-        if ch:  # the CH datacard only exists once the harvester has run (cmsenv)
-            run_stages([harvest_stage])
+    if shapes_only:
         manifest_path.write_text(json.dumps({"export_key": key, "time": time.time()}))
         return fitdir
 
-    stages = ([harvest_stage] if ch else []) + [
+    if datacard_only:
+        if ch:  # the CH datacard only exists once the harvester has run (cmsenv)
+            run_stages(card_stages)
+        # keep run_key only if the existing combine products still match this
+        # datacard; a regenerated datacard invalidates them
+        manifest = {"export_key": key, "time": time.time()}
+        if old_run_key == key:
+            manifest["run_key"] = key
+        manifest_path.write_text(json.dumps(manifest))
+        return fitdir
+
+    stages = card_stages + [
         ("text2workspace", do_t2w, t2w_command(fit), [WORKSPACE_FILE]),
-        ("FitDiagnostics", do_fitdiag, fitdiag_command(fit), [fitdiag_file(fit)]),
-        ("fit result dump", do_dump, f"python3 {DUMP_SCRIPT_FILE}", [FITRESULT_FILE]),
         *(
-            (f"MultiDimFit scan ({scan_tag(scan)})",
-             do_t2w or do_dump or missing(scan_file(fit, scan)),
-             lambda scan=scan: scan_command(fit, scan, _fitresult()),
-             [scan_file(fit, scan)])
-            for scan in scans
+            (f"MultiDimFit scan ({scan_tag(scan)})", run,
+             scan_command(fit, scan), [scan_file(fit, scan)])
+            for scan, run in zip(scans, run_scan)
         ),
+        # deferred command: the seed reads the scan products, which are copied
+        # back to fitdir as each scan stage completes (or were already fresh)
+        ("FitDiagnostics", do_fitdiag,
+         lambda: fitdiag_command(fit, seed=scan_seed(fitdir, fit)),
+         [fitdiag_file(fit)]),
+        ("fit result dump", do_dump, f"python3 {DUMP_SCRIPT_FILE}", [FITRESULT_FILE]),
     ]
     run_stages(stages)
 
-    manifest_path.write_text(json.dumps({"export_key": key, "time": time.time()}))
+    manifest_path.write_text(
+        json.dumps({"export_key": key, "run_key": key, "time": time.time()}))
     return fitdir

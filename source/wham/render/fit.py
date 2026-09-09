@@ -668,12 +668,14 @@ def render_fit_summary(entries: list, outdir: Path, var: str,
     save(fig, outdir, "fitsummary", console)
 
 
-def render_fit(fit: FitConfig, cfg: AnalysisConfig, fitdir: Path, console=None) -> None:
+def render_fit(fit: FitConfig, cfg: AnalysisConfig, fitdir: Path, console=None,
+               cat_cfgs: dict[str, AnalysisConfig] | None = None) -> None:
     import uproot
 
     from wham.render.common import set_style
 
     set_style()
+    cat_cfgs = cat_cfgs or {}
     multi = len(fit.categories) > 1
 
     # combine saves shapes with unit-width bins; recover the real edges per
@@ -692,6 +694,8 @@ def render_fit(fit: FitConfig, cfg: AnalysisConfig, fitdir: Path, console=None) 
     if fd_path.is_file():
         with uproot.open(fd_path) as fd:
             for cat in fit.categories:
+                # a control category renders with its own analysis's processes
+                ccfg = cat_cfgs.get(cat.name, cfg)
                 for dirname, label, fname in (
                     ("shapes_prefit", "Prefit", "prefit"),
                     ("shapes_fit_s", "Postfit (s+b)", "postfit"),
@@ -700,11 +704,11 @@ def render_fit(fit: FitConfig, cfg: AnalysisConfig, fitdir: Path, console=None) 
                     if key not in fd:
                         continue
                     _render_shape_dir(
-                        fit, cfg, fd[key],
+                        fit, ccfg, fd[key],
                         f"{label} — {cat.name}" if multi else label,
                         fitdir, f"{fname}_{cat.name}" if multi else fname,
                         console, edges=edges.get(cat.name),
-                        xlabel=var_label(cfg, cat.variable), var=cat.variable,
+                        xlabel=var_label(ccfg, cat.variable), var=cat.variable,
                     )
 
     # ---- nuisance pulls + POI impacts, and the full POI summary

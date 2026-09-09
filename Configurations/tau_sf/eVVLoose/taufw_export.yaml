@@ -1,0 +1,88 @@
+# TauFW-Fitter input export — VSjet VTight, VSe VVLoose, Run3 2024.
+# Run AFTER the five dm fits:
+#   wham export Configurations/tau_sf/eVVLoose/taufw_export.yaml
+# Writes the two harvester input files (`$BIN/$PROCESS`, `$BIN/$PROCESS_$SYSTEMATIC`,
+# signal `$BIN/$PROCESS_TES$MASS`) into a FRESH input_wham/ tree in the user's
+# TauFW area — never into the reference input_pt_less_region_pnet/.
+#
+# Process/systematic names below are the DATACARD names inside each fit's
+# shapes.root (config names sanitized, e.g. `W+jets` -> `W_jets`). A list is
+# SUMMED; a trailing '?' marks an input optional (skipped if absent). The TES
+# grid follows DY_genuine automatically (suffix passthrough, f=1.000 skipped —
+# plain ZTT is the nominal); wham's 0.005-step grid is a superset of the TauFW
+# reference's 0.010 steps, and the DM11 dirs are extras — the TauFW harvester
+# only reads the bins/masses its own config lists.
+# 2025: copy this file, swap the fit list + the era token in the output paths.
+name: taufw_eVVLoose_2024
+
+fits:
+  - tau_sf_dm0.yaml
+  - tau_sf_dm1.yaml
+  - tau_sf_dm2.yaml
+  - tau_sf_dm10.yaml
+  - tau_sf_dm11.yaml
+
+outputs:
+  # mu-tau file: 25 dirs DMX_ptY; pt5 rebinned 22 -> 11 bins (TauFW parity).
+  - file: /afs/cern.ch/user/h/haawedik/CMSSW_14_1_0_pre4/src/TauFW/Fitter/input_wham/againstjet_VVTight/againstelectron_VVLoose/ztt_mt_tes_m_vis.inputs-2024-13TeV_mutau.root
+    bins:
+      - {from: dm0_pt1,  to: DM0_pt1}
+      - {from: dm0_pt2,  to: DM0_pt2}
+      - {from: dm0_pt3,  to: DM0_pt3}
+      - {from: dm0_pt4,  to: DM0_pt4}
+      - {from: dm0_pt5,  to: DM0_pt5,  rebin: 2}
+      - {from: dm1_pt1,  to: DM1_pt1}
+      - {from: dm1_pt2,  to: DM1_pt2}
+      - {from: dm1_pt3,  to: DM1_pt3}
+      - {from: dm1_pt4,  to: DM1_pt4}
+      - {from: dm1_pt5,  to: DM1_pt5,  rebin: 2}
+      - {from: dm2_pt1,  to: DM2_pt1}
+      - {from: dm2_pt2,  to: DM2_pt2}
+      - {from: dm2_pt3,  to: DM2_pt3}
+      - {from: dm2_pt4,  to: DM2_pt4}
+      - {from: dm2_pt5,  to: DM2_pt5,  rebin: 2}
+      - {from: dm10_pt1, to: DM10_pt1}
+      - {from: dm10_pt2, to: DM10_pt2}
+      - {from: dm10_pt3, to: DM10_pt3}
+      - {from: dm10_pt4, to: DM10_pt4}
+      - {from: dm10_pt5, to: DM10_pt5, rebin: 2}
+      - {from: dm11_pt1, to: DM11_pt1}
+      - {from: dm11_pt2, to: DM11_pt2}
+      - {from: dm11_pt3, to: DM11_pt3}
+      - {from: dm11_pt4, to: DM11_pt4}
+      - {from: dm11_pt5, to: DM11_pt5, rebin: 2}
+    processes:
+      ZTT: DY_genuine
+      ZL:  DY_lfake
+      ZJ:  DY_jfake
+      TTT: tt
+      TTL: tt_lfake
+      TTJ: tt_jfake
+      W:   [W_jets, W_jfake]        # jTauFake shift acts on W_jfake only
+      VV:  dibosons
+      ST:  [ST, ST_lfake, ST_jfake]
+      QCD: QCD
+      data_obs: data_obs
+    systematics:
+      - {match: "ltf_{bin}", rename: "shape_mTauFake_{obin}"}
+      - {match: "jtf_{bin}", rename: "shape_jTauFake_{obin}"}
+    grids:
+      - {suffix: TES, skip_nominal: true}
+
+  # mu-mu control file: one counting bin. wham edges [70,110] vs TauFW's
+  # [40,150] — irrelevant for a 1-bin card. DY_2E is a documented zero-yield
+  # drop in the wham shapes, hence optional (ZJ may be absent from the file;
+  # keep the TauFW FitSetup_mumu.yml process list consistent).
+  - file: /afs/cern.ch/user/h/haawedik/CMSSW_14_1_0_pre4/src/TauFW/Fitter/input_wham/againstjet_VVTight/againstelectron_VVLoose/ztt_mm_tes_m_vis.inputs-2024-13TeV_mumu.root
+    bins:
+      - {from: zmm, to: baseline}
+    processes:
+      ZTT: DY_2Tau
+      ZL:  DY_2Mu
+      ZJ:  DY_2E?
+      W:   W_jets
+      VV:  dibosons
+      TT:  tt
+      ST:  ST
+      QCD: QCD
+      data_obs: data_obs
