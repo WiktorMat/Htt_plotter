@@ -48,7 +48,8 @@ def cache_key(
         "processes": {
             n: {"kind": p.kind, "samples": sorted(
                 s.name for s in samples if s.process == n),
-                **({"cut": p.cut} if p.cut else {})}
+                **({"cut": p.cut} if p.cut else {}),
+                **({"ff_component": p.ff_component} if p.ff_component else {})}
             for n, p in cfg.processes.items()
         },
         "lumi": cfg.lumi,
@@ -69,6 +70,12 @@ def cache_key(
         from wham.muffin import signature
 
         payload["fake_factors"] = signature(cfg.fake_factors)
+        est = cfg.fake_factors.estimate
+        if est is not None and est.active():
+            payload["fake_factors_estimate"] = {
+                "config": est.model_dump(by_alias=True),
+                "fractions": dict(getattr(spec, "ffestimate_fractions", ())),
+            }
     if extra:
         # e.g. CP weight columns; added conditionally so keys of histograms
         # without extras (the vast majority) stay stable.

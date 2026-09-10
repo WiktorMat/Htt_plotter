@@ -132,7 +132,7 @@ def closure_metrics(
     }
 
 
-def _metric_lines(metrics: dict[str, object], selected: list[str]) -> list[str]:
+def metric_lines(metrics: dict[str, object], selected: list[str]) -> list[str]:
     lines = []
     if "normalization" in selected:
         norm = metrics["norm_delta"]
@@ -241,7 +241,7 @@ def render_ffclosure(
         ax.tick_params(labelbottom=False)
         cms_label(ax, cfg)
 
-        lines = _metric_lines(metrics, closure.metrics)
+        lines = metric_lines(metrics, closure.metrics)
         if lines:
             ax.text(
                 0.03,

@@ -89,7 +89,7 @@ class VariableCfg(_Model):
 class ProcessCfg(_Model):
     samples: list[str] = []
     color: str = "tab:gray"
-    kind: Literal["mc", "data", "qcd"] = "mc"
+    kind: Literal["mc", "data", "qcd", "ff"] = "mc"
     label: str | None = None  # legend text; falls back to the process name
     # extra per-event mask folded onto the selection for this process only,
     # e.g. a genmatch requirement isolating genuine tau_h (genPartFlav_2 == 5)
@@ -97,15 +97,21 @@ class ProcessCfg(_Model):
     # Skipped for any sample whose skim lacks the referenced columns (so a
     # genmatch cut on a process whose samples carry no gen info is a no-op).
     cut: str | None = None
+    # For the mixed MUFFIN jet-fake estimate: identifies the MC fake component
+    # used for the corresponding process fraction. Genuine pieces stay as
+    # ordinary MC processes without this field.
+    ff_component: Literal["Wjets", "ttbar"] | None = None
 
     @model_validator(mode="after")
     def _samples_match_kind(self) -> "ProcessCfg":
-        if self.kind == "qcd" and self.samples:
-            raise ValueError("a kind=qcd process is derived and must not list samples")
-        if self.kind != "qcd" and not self.samples:
+        if self.kind in ("qcd", "ff") and self.samples:
+            raise ValueError(f"a kind={self.kind} process is derived and must not list samples")
+        if self.kind not in ("qcd", "ff") and not self.samples:
             raise ValueError("process must list at least one sample pattern")
-        if self.kind == "qcd" and self.cut is not None:
-            raise ValueError("a kind=qcd process is data-derived and takes no 'cut'")
+        if self.kind in ("qcd", "ff") and self.cut is not None:
+            raise ValueError(f"a kind={self.kind} process is data-derived and takes no 'cut'")
+        if self.kind != "mc" and self.ff_component is not None:
+            raise ValueError("ff_component is only valid for kind=mc processes")
         return self
 
 
@@ -238,6 +244,53 @@ class FFClosureCfg(_Model):
         return score_column(self.process)
 
 
+class FFEstimateComponentsCfg(_Model):
+    QCD: bool = False
+    Wjets: bool = False
+    ttbar: bool = False
+
+    def enabled(self) -> tuple[str, ...]:
+        return tuple(
+            name for name in ("QCD", "Wjets", "ttbar")
+            if bool(getattr(self, name))
+        )
+
+
+class FFApplicationRegionCfg(_Model):
+    selection: str
+    pass_: str = Field(alias="pass")
+    fail: str
+
+
+class FFEstimateCfg(_Model):
+    enabled: bool = False
+    output_process: str | None = None
+    components: FFEstimateComponentsCfg = FFEstimateComponentsCfg()
+    application_region: FFApplicationRegionCfg | None = None
+    fake_cut: str | None = None
+
+    @model_validator(mode="after")
+    def _enabled_needs_fields(self) -> "FFEstimateCfg":
+        if self.enabled and self.components.enabled() and not (
+                self.output_process and self.application_region):
+            raise ValueError(
+                "fake_factors.estimate with enabled components requires "
+                "output_process and application_region"
+            )
+        if self.enabled and (self.components.Wjets or self.components.ttbar) and not self.components.QCD:
+            raise ValueError(
+                "fake_factors.estimate.components Wjets=true or ttbar=true requires QCD=true"
+            )
+        return self
+
+    def active(self) -> bool:
+        return self.enabled and bool(self.components.enabled())
+
+    def model_processes(self) -> tuple[str, ...]:
+        mapping = {"QCD": "QCD", "Wjets": "Wjets", "ttbar": "ttbarMC"}
+        return tuple(mapping[c] for c in self.components.enabled())
+
+
 class FakeFactorsCfg(_Model):
     """Apply BDT fake-factor models at skim time (see wham/muffin.py)."""
 
@@ -248,6 +301,7 @@ class FakeFactorsCfg(_Model):
     era_label: int | None = None      # raw label override (2024 borrowing 2023BPix etc.)
     systematics: bool = False         # also write the _up/_down score columns
     closure: FFClosureCfg | None = None
+    estimate: FFEstimateCfg | None = None
 
     @model_validator(mode="after")
     def _era_resolvable(self) -> "FakeFactorsCfg":
@@ -264,6 +318,8 @@ class FakeFactorsCfg(_Model):
             raise ValueError(f"fake_factors.models does not exist: {self.models}")
         from wham.muffin import model_file
 
+        if self.estimate is not None and self.estimate.active():
+            self.processes = list(dict.fromkeys([*self.processes, *self.estimate.model_processes()]))
         for process in self.processes:
             try:
                 model_file(self.models, self.channel, process)
@@ -291,6 +347,9 @@ class StyleCfg(_Model):
 class PlotsCfg(_Model):
     resolution: list[tuple[str, str]] = []  # [reco, reference] pairs
     datamc: list[str] = []
+    datamc_metrics: list[
+        Literal["normalization", "shape_chi2", "max_significance"]
+    ] = []
     cp: list[CPPlotCfg] = []
     # weighted fit templates in the signal region; set programmatically
     # by `wham fit`, normally not written by hand.
@@ -365,6 +424,25 @@ class AnalysisConfig(_Model):
                         parse(src)
                     except ExprError as e:
                         raise ValueError(f"invalid expression in '{label}': {e}") from None
+        if self.fake_factors is not None and self.fake_factors.estimate is not None:
+            est = self.fake_factors.estimate
+            if est.enabled:
+                ar = est.application_region
+                for label, src in [
+                    ("fake_factors.estimate.application_region.selection",
+                     ar.selection if ar is not None else None),
+                    ("fake_factors.estimate.application_region.pass",
+                     ar.pass_ if ar is not None else None),
+                    ("fake_factors.estimate.application_region.fail",
+                     ar.fail if ar is not None else None),
+                    ("fake_factors.estimate.fake_cut", est.fake_cut),
+                ]:
+                    if src is None:
+                        continue
+                    try:
+                        parse(src)
+                    except ExprError as e:
+                        raise ValueError(f"invalid expression in '{label}': {e}") from None
         return self
 
     @model_validator(mode="after")
@@ -427,6 +505,27 @@ class AnalysisConfig(_Model):
         n_qcd = sum(1 for p in self.processes.values() if p.kind == "qcd")
         if n_qcd > 1:
             raise ValueError(f"at most one kind=qcd process allowed, found {n_qcd}")
+        n_ff = sum(1 for p in self.processes.values() if p.kind == "ff")
+        if n_ff > 1:
+            raise ValueError(f"at most one kind=ff process allowed, found {n_ff}")
+        est = self.fake_factors.estimate if self.fake_factors is not None else None
+        if est is not None and est.active():
+            out = self.processes.get(est.output_process)
+            if out is None or out.kind != "ff":
+                raise ValueError(
+                    "fake_factors.estimate.output_process must name a kind=ff process"
+                )
+            for component in ("Wjets", "ttbar"):
+                if getattr(est.components, component):
+                    matches = [
+                        name for name, proc in self.processes.items()
+                        if proc.ff_component == component
+                    ]
+                    if not matches:
+                        raise ValueError(
+                            f"fake_factors.estimate.components.{component}=true "
+                            f"requires at least one process with ff_component: {component}"
+                        )
         return self
 
     # ---- derived ----------------------------------------------------
@@ -481,6 +580,13 @@ class AnalysisConfig(_Model):
             cols |= self.columns_of_var(reco) | self.columns_of_var(ref)
         for v in (*self.plots.datamc, *self.plots.ffcheck):
             cols |= self.columns_of_var(v)
+        if self.fake_factors is not None and self.fake_factors.estimate is not None:
+            est = self.fake_factors.estimate
+            if est.enabled and est.application_region is not None:
+                ar = est.application_region
+                for src in (ar.selection, ar.pass_, ar.fail, est.fake_cut):
+                    if src:
+                        cols |= parse(src).columns
         if self.fake_factors is not None and self.fake_factors.closure is not None:
             cl = self.fake_factors.closure
             if cl.enabled:

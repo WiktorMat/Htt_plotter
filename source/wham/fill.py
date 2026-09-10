@@ -24,6 +24,12 @@ REGIONS_SS = ("OS", "SS")
 REGIONS_FF = ("OS_iso", "OS_antiiso")
 REGIONS_FFCHECK = ("OS_antiiso_raw", "OS_antiiso_ff")
 REGIONS_FFCLOSURE = ("pass", "fail", "nan_weight")
+REGIONS_FFESTIMATE = (
+    "ff_pass",
+    "ff_fail",
+    "ff_nonfinite_component",
+    "ff_nonfinite_combined",
+)
 REGIONS_CP = ("even", "odd")
 
 HistKey = tuple[str, str]  # (family, variable-or-pair-name)
@@ -82,6 +88,12 @@ class FillSpec:
     ffclosure_pass: str | None = None
     ffclosure_fail: str | None = None
     ffclosure_weight: str | None = None
+    ffestimate_enabled: bool = False
+    ffestimate_selection: str | None = None
+    ffestimate_pass: str | None = None
+    ffestimate_fail: str | None = None
+    ffestimate_fractions: tuple[tuple[str, float], ...] = ()
+    ffestimate_scores: tuple[tuple[str, str], ...] = ()
     # shape variations filling the variation axis of the datamc/fitcp hists:
     # (name, target, processes, weight_up, weight_down, factors). weight/qcd_ff
     # targets use weight_up/down (factors empty); a columns target carries
@@ -130,6 +142,8 @@ def make_hist(spec: FillSpec, family: str, var: str, vcfg: dict):
                           if v == var})
     else:
         regions = list(regions_for(family, spec.qcd_method))
+        if family == "datamc" and spec.ffestimate_enabled:
+            regions = list(dict.fromkeys([*regions, *REGIONS_FFESTIMATE]))
     return hist.Hist(
         hist.axis.StrCategory(list(spec.processes), name="process"),
         hist.axis.StrCategory(regions, name="region"),
@@ -213,6 +227,15 @@ def build_fill_spec(
         (v, vdump(v)) for v in (closure.variables if closure is not None and closure.enabled else [])
         if "ffclosure" in families and want(v)
     )
+    estimate = cfg.fake_factors.estimate if cfg.fake_factors is not None else None
+    estimate_active = estimate is not None and estimate.active()
+    estimate_ar = estimate.application_region if estimate_active else None
+    if estimate_active:
+        from wham.jetfakes import component_score_columns
+
+        estimate_scores = component_score_columns(estimate.components.enabled())
+    else:
+        estimate_scores = ()
 
     return FillSpec(
         selection=cfg.selection,
@@ -236,6 +259,11 @@ def build_fill_spec(
         ffclosure_pass=closure.pass_ if closure is not None and closure.enabled else None,
         ffclosure_fail=closure.fail if closure is not None and closure.enabled else None,
         ffclosure_weight=closure.weight_expr() if closure is not None and closure.enabled else None,
+        ffestimate_enabled=estimate_active,
+        ffestimate_selection=estimate_ar.selection if estimate_ar is not None else None,
+        ffestimate_pass=estimate_ar.pass_ if estimate_ar is not None else None,
+        ffestimate_fail=estimate_ar.fail if estimate_ar is not None else None,
+        ffestimate_scores=estimate_scores,
         variations=tuple(
             (v.name, v.target, tuple(v.processes), v.weight_up, v.weight_down,
              tuple(sorted(v.factors.items())))
@@ -576,6 +604,51 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
     if spec.datamc:
         fill_datamc(nominal_ctx, datamc_region_fills(nominal_ctx, weights))
 
+    # ---- mixed MUFFIN jet-fake estimate application region. The final
+    # output process is materialized after all samples are merged.
+    if (spec.datamc and spec.ffestimate_enabled
+            and spec.ffestimate_selection is not None
+            and spec.ffestimate_pass is not None
+            and spec.ffestimate_fail is not None
+            and spec.ffestimate_fractions):
+        parsed_est_sel = parse(spec.ffestimate_selection)
+        parsed_est_pass = parse(spec.ffestimate_pass)
+        parsed_est_fail = parse(spec.ffestimate_fail)
+        needed_est = parsed_est_sel.columns | parsed_est_pass.columns | parsed_est_fail.columns
+        needed_est |= {col for _, col in spec.ffestimate_scores}
+        if needed_est <= cols.names:
+            est_base = base_mask(nominal_ctx) & cols.eval(spec.ffestimate_selection).astype(bool)
+            est_pass = est_base & cols.eval(spec.ffestimate_pass).astype(bool)
+            est_fail = est_base & cols.eval(spec.ffestimate_fail).astype(bool)
+            overlap = est_pass & est_fail
+            if np.any(overlap):
+                raise RuntimeError(
+                    "fake_factors.estimate application_region pass/fail selections "
+                    f"overlap for {int(np.sum(overlap))} events in sample {sample.name}"
+                )
+            fractions = dict(spec.ffestimate_fractions)
+            combined = np.zeros(n, dtype=float)
+            bad_component = np.zeros(n, dtype=bool)
+            for component, score_expr in spec.ffestimate_scores:
+                values = cols.eval(score_expr).astype(float)
+                bad_component |= ~np.isfinite(values)
+                combined += fractions.get(component, 0.0) * values
+            finite_combined = np.isfinite(combined)
+            for var, vcfg in spec.datamc:
+                data = var_data(nominal_ctx, var, vcfg)
+                if data is None:
+                    continue
+                values, valid = data
+                fill("datamc", var, vcfg, "ff_pass", values,
+                     est_pass & valid, weights)
+                fill("datamc", var, vcfg, "ff_fail", values,
+                     est_fail & valid & ~bad_component & finite_combined,
+                     weights * combined)
+                fill("datamc", var, vcfg, "ff_nonfinite_component", values,
+                     est_fail & valid & bad_component, np.ones(n))
+                fill("datamc", var, vcfg, "ff_nonfinite_combined", values,
+                     est_fail & valid & ~finite_combined, np.ones(n))
+
     # ---- ffcheck: anti-iso fills with and without the per-event FF weight
     if spec.ffcheck and spec.qcd_ff_weight is not None:
         os_mask = region_part(nominal_ctx, "os")
@@ -781,6 +854,20 @@ def fill_all(
     from wham.qcd import estimate_qcd
 
     spec = build_fill_spec(cfg, families=families, only_vars=only_vars)
+    jetfake_fractions = None
+    if "datamc" in families:
+        from dataclasses import replace
+
+        from wham.jetfakes import active_estimate, compute_ff_fractions
+
+        if active_estimate(cfg):
+            jetfake_fractions = compute_ff_fractions(
+                cfg, samples, skims, console=console
+            )
+            spec = replace(
+                spec,
+                ffestimate_fractions=tuple(jetfake_fractions.fractions.items()),
+            )
     wanted = hist_keys(spec)
     extras = spec_extras(spec)
 
@@ -825,7 +912,13 @@ def fill_all(
 
         complete_variation_slices(sub_spec, fresh)
         if "datamc" in families:
-            estimate_qcd(cfg, {k: h for k, h in fresh.items() if k[0] == "datamc"})
+            datamc = {k: h for k, h in fresh.items() if k[0] == "datamc"}
+            if jetfake_fractions is not None:
+                from wham.jetfakes import estimate_jet_fakes
+
+                estimate_jet_fakes(cfg, datamc, jetfake_fractions, console=console)
+            else:
+                estimate_qcd(cfg, datamc)
 
         for family, name, vcfg in missing:
             h = fresh[(family, name)]

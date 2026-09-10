@@ -10,6 +10,8 @@ import mplhep as hep
 import numpy as np
 
 from wham.config import AnalysisConfig
+from wham.jetfakes import FF_PASS, active_estimate
+from wham.render.ffclosure import closure_metrics, metric_lines
 from wham.render.common import (
     cms_label,
     draw_unc_band,
@@ -29,7 +31,7 @@ def signal_region(qcd_method: str) -> str:
 def render_datamc(
     cfg: AnalysisConfig, hists: dict, outdir: Path, only_vars=None, console=None
 ) -> None:
-    region = signal_region(cfg.qcd.method)
+    region = FF_PASS if active_estimate(cfg) else signal_region(cfg.qcd.method)
     data_proc = cfg.data_process()
 
     for (family, var), h in sorted(hists.items()):
@@ -83,6 +85,32 @@ def render_datamc(
         ax.tick_params(labelbottom=False)
         cms_label(ax, cfg)
         draw_unroll_guides(ax, cfg, var)
+        if cfg.plots.datamc_metrics:
+            metrics = closure_metrics(data, data_view["variance"], mc, mc_sumw2, edges)
+            lines = metric_lines(metrics, cfg.plots.datamc_metrics)
+            if lines:
+                ax.text(
+                    0.03,
+                    0.95,
+                    "\n".join(lines),
+                    transform=ax.transAxes,
+                    ha="left",
+                    va="top",
+                    fontsize=13,
+                    bbox={"facecolor": "white", "edgecolor": "gray", "alpha": 0.85},
+                )
+            if console is not None:
+                norm = metrics["norm_delta"]
+                chi2 = metrics["shape_chi2_ndf"]
+                max_abs_z = metrics["max_abs_z"]
+                console.print(
+                    f"  datamc/{var}: data={metrics['target_sum']:.6g}, "
+                    f"mc={metrics['prediction_sum']:.6g}, "
+                    f"norm={'N/A' if norm is None else f'{100.0 * float(norm):+.2f}%'}, "
+                    f"shape_chi2/ndf={'N/A' if chi2 is None else f'{float(chi2):.3g}'}, "
+                    f"max|z|={'N/A' if max_abs_z is None else f'{float(max_abs_z):.3g}'}, "
+                    f"skipped_bins={metrics['skipped_shape_bins']}"
+                )
 
         # ---- ratio panel
         safe_mc = np.where(mc > 0, mc, np.nan)

@@ -29,6 +29,113 @@ def test_required_columns(workspace: dict) -> None:
             "trg", "weight", "wt_cp_sm", "wt_cp_ps"} <= cols
 
 
+def test_datamc_metrics_are_optional_render_config(workspace: dict) -> None:
+    cfg = load_config(workspace["yaml"])
+    assert cfg.plots.datamc_metrics == []
+    before = cfg.required_columns()
+
+    plots = cfg.plots.model_copy(
+        update={"datamc_metrics": ["normalization", "shape_chi2", "max_significance"]}
+    )
+    cfg = cfg.model_copy(update={"plots": plots})
+
+    assert cfg.plots.datamc_metrics == [
+        "normalization",
+        "shape_chi2",
+        "max_significance",
+    ]
+    assert cfg.required_columns() == before
+
+
+def _fake_factor_models(tmp_path):
+    root = tmp_path / "models"
+    for process in ("QCD", "Wjets", "ttbarMC"):
+        mdir = root / f"model_mt_{process}"
+        mdir.mkdir(parents=True)
+        (mdir / "model.json").write_text("{}", encoding="utf-8")
+    return root
+
+
+def test_ff_estimate_validation_and_model_process_derivation(workspace: dict) -> None:
+    base = workspace["yaml"].read_text()
+    models = _fake_factor_models(workspace["tmp"])
+    cfg_path = workspace["tmp"] / "ff_estimate.yaml"
+    cfg_path.write_text(base.replace(
+        "processes:\n",
+        "processes:\n  jet_fakes: {kind: ff, color: tab:olive}\n",
+    ).replace(
+        "qcd:\n",
+        """
+fake_factors:
+  models: {models}
+  channel: mt
+  era_label: 0
+  estimate:
+    enabled: true
+    output_process: jet_fakes
+    components: {{QCD: true, Wjets: true, ttbar: false}}
+    application_region:
+      selection: "os == 1"
+      pass: "id_2 >= 5"
+      fail: "id_2 > 1 & id_2 < 5"
+    fake_cut: "id_2 < 5"
+qcd:
+""".format(models=models),
+    ).replace(
+        'DY:   {samples: ["DY_*"], color: "tab:orange"}',
+        'DY:   {samples: ["DY_*"], color: "tab:orange", ff_component: Wjets}',
+    ))
+
+    cfg = load_config(cfg_path)
+    assert cfg.fake_factors.processes == ["QCD", "Wjets"]
+
+
+def test_ff_estimate_requires_qcd_for_w_or_top(workspace: dict) -> None:
+    base = workspace["yaml"].read_text()
+    models = _fake_factor_models(workspace["tmp"])
+    cfg_path = workspace["tmp"] / "bad_ff_estimate.yaml"
+    cfg_path.write_text(base + f"""
+fake_factors:
+  models: {models}
+  channel: mt
+  era_label: 0
+  estimate:
+    enabled: true
+    output_process: jet_fakes
+    components: {{QCD: false, Wjets: true, ttbar: false}}
+    application_region:
+      selection: "os == 1"
+      pass: "id_2 >= 5"
+      fail: "id_2 > 1 & id_2 < 5"
+""")
+
+    with pytest.raises(ValueError, match="requires QCD=true"):
+        load_config(cfg_path)
+
+
+def test_ff_estimate_output_process_must_be_kind_ff(workspace: dict) -> None:
+    base = workspace["yaml"].read_text()
+    models = _fake_factor_models(workspace["tmp"])
+    cfg_path = workspace["tmp"] / "bad_ff_output.yaml"
+    cfg_path.write_text(base + f"""
+fake_factors:
+  models: {models}
+  channel: mt
+  era_label: 0
+  estimate:
+    enabled: true
+    output_process: QCD
+    components: {{QCD: true, Wjets: false, ttbar: false}}
+    application_region:
+      selection: "os == 1"
+      pass: "id_2 >= 5"
+      fail: "id_2 > 1 & id_2 < 5"
+""")
+
+    with pytest.raises(ValueError, match="kind=ff"):
+        load_config(cfg_path)
+
+
 @pytest.mark.parametrize(
     "patch, match",
     [
